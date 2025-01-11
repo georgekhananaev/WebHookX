@@ -1,0 +1,118 @@
+# ===== Python Bytecode and Cache =====
+# Compiled Python files
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Cython debug symbols
+cython_debug/
+
+# ===== Virtual Environments =====
+# Virtual environment directories
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ===== Project-Specific Folders =====
+# Ignore the 'projects' directory and its contents
+projects/
+
+# ===== Configuration Files =====
+# Configuration files that may contain sensitive information
+config.yaml
+config.yml
+
+# ===== Log and Database Files =====
+# Log files
+*.log
+
+# SQLite database for logs
+logs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*.swn
+
+# ===== Compiled Binaries and Distributions =====
+# Build directories
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Wheel files
+*.whl
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===== Docker and Container-Related Files =====
+# Docker environment files
+docker-compose.override.yml
+
+# Docker ignore file
+.dockerignore
+
+# ===== IDE and Editor-Specific Files =====
+# VSCode
+.vscode/
+.history/
+
+# PyCharm
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# Atom
+.atom/
+
+# Eclipse
+.project
+.pydevproject
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Vim
+.swo
+.swn
+
+# ===== Operating System-Specific Files =====
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== Other Files to Ignore =====
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*.rej
+
+# Secret files (ensure these are not accidentally committed)
+secrets/
+*.key
+*.pem
