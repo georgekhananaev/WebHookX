@@ -178,7 +178,7 @@ WebHookX is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Need Help?
 
-If you run into any issues or have questions, feel free to [open an issue](https://github.com/georgekhananaev/webhookx/issues) or email us at `support@webhookx.io`. We’re here to help!
+If you run into any issues or have questions, feel free to [open an issue](https://github.com/georgekhananaev/webhookx/issues).
 
 
 ## Support Me
