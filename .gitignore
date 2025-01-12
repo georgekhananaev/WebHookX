@@ -21,6 +21,9 @@ venv.bak/
 # Ignore the 'projects' directory and its contents
 projects/
 
+# Ignore the 'tests' directory and its contents
+tests/
+
 # ===== Configuration Files =====
 # Configuration files that may contain sensitive information
 config.yaml
