@@ -4,6 +4,8 @@ import hmac
 import hashlib
 import subprocess
 import logging
+import sys
+
 from config import WEBHOOK_SECRET, DOCKER_COMPOSE_PATH, DOCKER_COMPOSE_OPTIONS
 
 logger = logging.getLogger(__name__)
@@ -70,5 +72,15 @@ def run_command(command: str, cwd: str):
         raise Exception(str(e))
 
 
+# def get_docker_compose_command():
+#     return f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
+
 def get_docker_compose_command():
-    return f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
+    # Build the base command
+    command = f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
+
+    # Prepend `sudo` if running on Linux
+    if sys.platform.startswith("linux"):
+        command = f"sudo {command}"
+
+    return command
