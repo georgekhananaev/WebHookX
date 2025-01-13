@@ -1,6 +1,8 @@
 import os
 import logging
 import traceback
+import json
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request, Header, HTTPException, status
 
@@ -23,8 +25,8 @@ async def handle_webhook(
     logger.info("Webhook endpoint was called.")
 
     # Read the raw request body and log it for debugging
-    body = await request.body()
-    logger.debug(f"Raw request body: {body}")
+    body_bytes = await request.body()
+    logger.debug(f"Raw request body: {body_bytes}")
 
     # Ensure the signature header is provided
     if not x_hub_signature_256:
@@ -35,7 +37,7 @@ async def handle_webhook(
         )
 
     # Verify the signature using the shared secret from the config
-    if not verify_signature(body, x_hub_signature_256):
+    if not verify_signature(body_bytes, x_hub_signature_256):
         logger.warning("Invalid signature.")
         notifier.notify_deploy_event("unknown", "unknown", "failed", "Invalid signature.")
         raise HTTPException(
@@ -43,9 +45,22 @@ async def handle_webhook(
             detail="Invalid signature"
         )
 
-    # Decode the JSON payload
+    # Determine the content type of the request and extract the JSON payload accordingly.
+    content_type = request.headers.get("Content-Type", "")
+    payload = None
     try:
-        payload = await request.json()
+        if "application/json" in content_type:
+            payload = await request.json()
+        elif "application/x-www-form-urlencoded" in content_type:
+            # parse_qs returns values as list, so extract the first value.
+            form_data = parse_qs(body_bytes.decode("utf-8"))
+            if "payload" in form_data:
+                payload_str = form_data["payload"][0]
+                payload = json.loads(payload_str)
+            else:
+                raise ValueError("No payload parameter in form data")
+        else:
+            raise ValueError(f"Unsupported Content-Type: {content_type}")
         logger.debug(f"Decoded JSON payload: {payload}")
     except Exception as e:
         error_trace = traceback.format_exc()
@@ -56,12 +71,12 @@ async def handle_webhook(
             detail="Invalid JSON payload"
         )
 
-    # Handle ping events separately
+    # Handle ping events separately (either via header or detecting a 'zen' field)
     if x_github_event == "ping" or "zen" in payload:
         logger.info("Received ping event from GitHub.")
         return {"message": "Ping successful.", "zen": payload.get("zen")}
 
-    # Try parsing the payload into the GitHubWebhook model
+    # Validate the payload with the Pydantic model.
     try:
         webhook = GitHubWebhook(**payload)
         logger.debug(f"Parsed webhook payload: {webhook}")
@@ -74,7 +89,7 @@ async def handle_webhook(
             detail="Invalid payload"
         )
 
-    # Extract repository full name and verify that it is configured for deployment
+    # Extract repository full name and verify that it's configured for deployment.
     repo_full_name = webhook.repository.get("full_name")
     logger.info(f"Received webhook for repository: {repo_full_name}")
 
@@ -103,25 +118,28 @@ async def handle_webhook(
 
     deploy_dir = os.path.abspath(deploy_dir)
 
-    # Ensure that the payload has a "ref" field
-    if not hasattr(webhook, "ref") and "ref" not in payload:
+    # Ensure that the payload has a "ref" field. (If not, this might be a ping)
+    if not payload.get("ref"):
         message = "Missing 'ref' field in payload."
         logger.error(message)
         notifier.notify_deploy_event(repo_full_name, "unknown", "failed", message)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
 
-    # Determine which branch was pushed to
+    # Determine which branch was pushed to.
     push_branch = payload.get("ref", "").split('/')[-1]
     logger.info(f"Pushed to branch: {push_branch}")
 
-    # If the pushed branch doesn't match the expected branch, skip deployment
+    # If the pushed branch doesn't match the expected branch, skip deployment.
     if push_branch != branch:
         message = f"Push to branch '{push_branch}' ignored. Expected branch '{branch}'."
         logger.info(message)
         notifier.notify_deploy_event(repo_full_name, push_branch, "ignored", message)
         return {"message": message}
 
-    # Pull the latest changes and rebuild if necessary
+    # Pull the latest changes and rebuild if necessary.
     try:
         git_command = f"git pull origin {branch}"
         logger.info(f"Running command: {git_command} in {deploy_dir}")
@@ -153,7 +171,6 @@ async def handle_webhook(
             detail=str(e)
         )
 
-    # If deployment is successful, notify and return a success message
-    logger.info("Deployment successful.")
+    logger.info("Deployment successful")
     notifier.notify_deploy_event(repo_full_name, branch, "successful", "Deployment completed successfully.")
-    return {"message": "Deployment successful."}
+    return {"message": "Deployment successful"}
