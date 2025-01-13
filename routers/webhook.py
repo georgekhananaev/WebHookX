@@ -6,7 +6,7 @@ from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request, Header, HTTPException, status
 from models.github_webhook import GitHubWebhook  # Adjust import as needed
-from utils import verify_signature, run_command, get_docker_compose_command, restart_containers  # Adjust imports as needed
+from utils import verify_signature, run_command, restart_containers
 from config import REPO_DEPLOY_MAP
 from notifications import Notifications
 
@@ -23,7 +23,7 @@ async def handle_webhook(
 ):
     logger.info("Webhook endpoint was called.")
 
-    # Read the raw request body and log it for debugging
+    # Read raw request body
     body_bytes = await request.body()
     logger.debug(f"Raw request body: {body_bytes}")
 

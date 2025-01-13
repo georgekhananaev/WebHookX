@@ -71,41 +71,48 @@ def run_command(command: str, cwd: str):
 
 
 def get_docker_compose_command():
-    # Build the base command for "up" using the options from config.
+    # Assemble the command for 'up'
     command = f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
-
-    # Prepend `sudo` if running on Linux
     if sys.platform.startswith("linux"):
         command = f"sudo {command}"
-
     return command
 
 
 def get_docker_compose_down_command():
-    """
-    Returns the docker-compose command to take down containers
-    while removing orphan containers to avoid errors with active endpoints.
-    """
+    # Assemble the command for 'down' including the --remove-orphans flag.
     base_cmd = DOCKER_COMPOSE_PATH
     if sys.platform.startswith("linux"):
         base_cmd = f"sudo {base_cmd}"
-    # Adding --remove-orphans to ensure any orphan endpoints are removed.
     return f"{base_cmd} down --remove-orphans"
+
+
+def safe_down_containers(deploy_dir: str):
+    """
+    Attempts to shut down docker containers.
+    If the error indicates active endpoints, it logs a warning and ignores it.
+    """
+    down_command = get_docker_compose_down_command()
+    logger.info("Attempting to take down running containers (if any)...")
+    try:
+        run_command(down_command, cwd=deploy_dir)
+    except Exception as e:
+        err_message = str(e)
+        if "has active endpoints" in err_message:
+            logger.warning(
+                "Encountered active endpoints error when removing network. "
+                "Continuing despite the following error: %s", err_message
+            )
+        else:
+            raise e
 
 
 def restart_containers(deploy_dir: str):
     """
-    Takes down any running Docker containers (using the down command with --remove-orphans)
-    and then rebuilds and starts them using the up command.
-
-    :param deploy_dir: The directory containing your docker-compose.yaml file.
+    Restarts containers:
+      1. Takes down any running containers (ignoring active endpoint errors)
+      2. Rebuilds and starts containers using docker-compose up.
     """
-    # Use the custom down command which removes orphan endpoints.
-    down_command = get_docker_compose_down_command()
-    logger.info("Taking down running containers (if any)...")
-    run_command(down_command, cwd=deploy_dir)
-
-    # Run the up command to rebuild and start containers.
+    safe_down_containers(deploy_dir)
     up_command = get_docker_compose_command()
     logger.info("Rebuilding and starting containers...")
     run_command(up_command, cwd=deploy_dir)

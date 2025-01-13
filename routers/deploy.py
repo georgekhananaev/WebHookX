@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from dependencies import get_deploy_api_key
 from models.deploy_request import DeployRequest
-from utils import run_command, get_docker_compose_command, restart_containers
+from utils import run_command, restart_containers
 from config import REPO_DEPLOY_MAP
 from notifications import Notifications
 import os
@@ -53,10 +53,10 @@ def manual_deploy(deploy_request: DeployRequest, api_key: str = Depends(get_depl
         return {"message": message}
 
     try:
-        # Pull the latest changes from git.
+        # Pull latest changes from git.
         git_command = f"git pull origin {branch}"
         logger.info(f"Running command: {git_command} in {deploy_dir}")
-        git_stdout, git_stderr = run_command(git_command, cwd=deploy_dir)
+        git_stdout, _ = run_command(git_command, cwd=deploy_dir)
 
         if "Already up to date." in git_stdout:
             logger.info("No updates from git pull.")
