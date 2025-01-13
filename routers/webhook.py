@@ -5,9 +5,8 @@ import json
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request, Header, HTTPException, status
-
 from models.github_webhook import GitHubWebhook  # Adjust import as needed
-from utils import verify_signature, run_command, get_docker_compose_command  # Adjust imports as needed
+from utils import verify_signature, run_command, get_docker_compose_command, restart_containers  # Adjust imports as needed
 from config import REPO_DEPLOY_MAP
 from notifications import Notifications
 
@@ -28,7 +27,6 @@ async def handle_webhook(
     body_bytes = await request.body()
     logger.debug(f"Raw request body: {body_bytes}")
 
-    # Ensure the signature header is provided
     if not x_hub_signature_256:
         logger.error("Missing X-Hub-Signature-256 header.")
         raise HTTPException(
@@ -36,7 +34,6 @@ async def handle_webhook(
             detail="Missing signature header"
         )
 
-    # Verify the signature using the shared secret from the config
     if not verify_signature(body_bytes, x_hub_signature_256):
         logger.warning("Invalid signature.")
         notifier.notify_deploy_event("unknown", "unknown", "failed", "Invalid signature.")
@@ -45,14 +42,12 @@ async def handle_webhook(
             detail="Invalid signature"
         )
 
-    # Determine the content type of the request and extract the JSON payload accordingly.
     content_type = request.headers.get("Content-Type", "")
     payload = None
     try:
         if "application/json" in content_type:
             payload = await request.json()
         elif "application/x-www-form-urlencoded" in content_type:
-            # parse_qs returns values as list, so extract the first value.
             form_data = parse_qs(body_bytes.decode("utf-8"))
             if "payload" in form_data:
                 payload_str = form_data["payload"][0]
@@ -71,12 +66,11 @@ async def handle_webhook(
             detail="Invalid JSON payload"
         )
 
-    # Handle ping events separately (either via header or detecting a 'zen' field)
+    # Handle ping events separately
     if x_github_event == "ping" or "zen" in payload:
         logger.info("Received ping event from GitHub.")
         return {"message": "Ping successful.", "zen": payload.get("zen")}
 
-    # Validate the payload with the Pydantic model.
     try:
         webhook = GitHubWebhook(**payload)
         logger.debug(f"Parsed webhook payload: {webhook}")
@@ -89,7 +83,6 @@ async def handle_webhook(
             detail="Invalid payload"
         )
 
-    # Extract repository full name and verify that it's configured for deployment.
     repo_full_name = webhook.repository.get("full_name")
     logger.info(f"Received webhook for repository: {repo_full_name}")
 
@@ -118,7 +111,6 @@ async def handle_webhook(
 
     deploy_dir = os.path.abspath(deploy_dir)
 
-    # Ensure that the payload has a "ref" field. (If not, this might be a ping)
     if not payload.get("ref"):
         message = "Missing 'ref' field in payload."
         logger.error(message)
@@ -128,18 +120,15 @@ async def handle_webhook(
             detail=message
         )
 
-    # Determine which branch was pushed to.
     push_branch = payload.get("ref", "").split('/')[-1]
     logger.info(f"Pushed to branch: {push_branch}")
 
-    # If the pushed branch doesn't match the expected branch, skip deployment.
     if push_branch != branch:
         message = f"Push to branch '{push_branch}' ignored. Expected branch '{branch}'."
         logger.info(message)
         notifier.notify_deploy_event(repo_full_name, push_branch, "ignored", message)
         return {"message": message}
 
-    # Pull the latest changes and rebuild if necessary.
     try:
         git_command = f"git pull origin {branch}"
         logger.info(f"Running command: {git_command} in {deploy_dir}")
@@ -151,16 +140,12 @@ async def handle_webhook(
             logger.info("No updates from git pull.")
             if force_rebuild:
                 logger.info("'force_rebuild' is enabled. Proceeding to rebuild Docker services.")
-                docker_up_command = get_docker_compose_command()
-                logger.info(f"Running command: {docker_up_command} in {deploy_dir}")
-                run_command(docker_up_command, cwd=deploy_dir)
+                restart_containers(deploy_dir)
             else:
                 logger.info("'force_rebuild' is disabled. Skipping Docker rebuild.")
         else:
             logger.info("Updates pulled from git. Proceeding to rebuild Docker services.")
-            docker_up_command = get_docker_compose_command()
-            logger.info(f"Running command: {docker_up_command} in {deploy_dir}")
-            run_command(docker_up_command, cwd=deploy_dir)
+            restart_containers(deploy_dir)
 
     except Exception as e:
         error_trace = traceback.format_exc()

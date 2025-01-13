@@ -1,5 +1,3 @@
-# utils.py
-
 import hmac
 import hashlib
 import subprocess
@@ -72,9 +70,6 @@ def run_command(command: str, cwd: str):
         raise Exception(str(e))
 
 
-# def get_docker_compose_command():
-#     return f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
-
 def get_docker_compose_command():
     # Build the base command
     command = f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
@@ -84,3 +79,26 @@ def get_docker_compose_command():
         command = f"sudo {command}"
 
     return command
+
+
+def restart_containers(deploy_dir: str):
+    """
+    Ensure that if containers are already running, they are taken down first before a rebuild and startup.
+    The function first takes down any running containers and then starts them up with the given Docker Compose options.
+
+    :param deploy_dir: The directory containing your docker-compose.yaml file.
+    """
+    # Get the base Docker Compose command without additional options for the down step.
+    base_command = DOCKER_COMPOSE_PATH
+    if sys.platform.startswith("linux"):
+        base_command = f"sudo {base_command}"
+
+    # Stop and remove running containers (the 'down' command)
+    down_command = f"{base_command} down"
+    logger.info("Taking down running containers (if any)...")
+    run_command(down_command, cwd=deploy_dir)
+
+    # Start up containers with rebuild (using configured options).
+    up_command = get_docker_compose_command()
+    logger.info("Rebuilding and starting containers...")
+    run_command(up_command, cwd=deploy_dir)

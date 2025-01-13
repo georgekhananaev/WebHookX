@@ -33,7 +33,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Include routers
 app.include_router(health_router)
-app.include_router(test_command_router)
+# app.include_router(test_command_router)
 app.include_router(webhook_router)
 app.include_router(deploy_router)
 
