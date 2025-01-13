@@ -1,3 +1,5 @@
+# deploy.py is a FastAPI router that handles manual deployment requests.
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from dependencies import get_deploy_api_key
 from models.deploy_request import DeployRequest
