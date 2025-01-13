@@ -71,7 +71,7 @@ def run_command(command: str, cwd: str):
 
 
 def get_docker_compose_command():
-    # Build the base command
+    # Build the base command for "up" using the options from config.
     command = f"{DOCKER_COMPOSE_PATH} {DOCKER_COMPOSE_OPTIONS}"
 
     # Prepend `sudo` if running on Linux
@@ -81,24 +81,31 @@ def get_docker_compose_command():
     return command
 
 
+def get_docker_compose_down_command():
+    """
+    Returns the docker-compose command to take down containers
+    while removing orphan containers to avoid errors with active endpoints.
+    """
+    base_cmd = DOCKER_COMPOSE_PATH
+    if sys.platform.startswith("linux"):
+        base_cmd = f"sudo {base_cmd}"
+    # Adding --remove-orphans to ensure any orphan endpoints are removed.
+    return f"{base_cmd} down --remove-orphans"
+
+
 def restart_containers(deploy_dir: str):
     """
-    Ensure that if containers are already running, they are taken down first before a rebuild and startup.
-    The function first takes down any running containers and then starts them up with the given Docker Compose options.
+    Takes down any running Docker containers (using the down command with --remove-orphans)
+    and then rebuilds and starts them using the up command.
 
     :param deploy_dir: The directory containing your docker-compose.yaml file.
     """
-    # Get the base Docker Compose command without additional options for the down step.
-    base_command = DOCKER_COMPOSE_PATH
-    if sys.platform.startswith("linux"):
-        base_command = f"sudo {base_command}"
-
-    # Stop and remove running containers (the 'down' command)
-    down_command = f"{base_command} down"
+    # Use the custom down command which removes orphan endpoints.
+    down_command = get_docker_compose_down_command()
     logger.info("Taking down running containers (if any)...")
     run_command(down_command, cwd=deploy_dir)
 
-    # Start up containers with rebuild (using configured options).
+    # Run the up command to rebuild and start containers.
     up_command = get_docker_compose_command()
     logger.info("Rebuilding and starting containers...")
     run_command(up_command, cwd=deploy_dir)
