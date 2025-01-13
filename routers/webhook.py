@@ -15,45 +15,77 @@ notifier = Notifications(config_path="config.yaml")
 
 
 @router.post("/webhook", summary="GitHub Webhook Endpoint")
-async def handle_webhook(request: Request, x_hub_signature_256: str = Header(None)):
+async def handle_webhook(
+    request: Request,
+    x_hub_signature_256: str = Header(None),
+    x_github_event: str = Header(None)
+):
     logger.info("Webhook endpoint was called.")
 
-    # Read and log the raw request body for debugging
+    # Read the raw request body and log it for debugging
     body = await request.body()
     logger.debug(f"Raw request body: {body}")
 
     # Ensure the signature header is provided
     if not x_hub_signature_256:
         logger.error("Missing X-Hub-Signature-256 header.")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing signature header")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing signature header"
+        )
 
-    # Verify the signature using the shared secret from the config.yaml
+    # Verify the signature using the shared secret from the config
     if not verify_signature(body, x_hub_signature_256):
         logger.warning("Invalid signature.")
         notifier.notify_deploy_event("unknown", "unknown", "failed", "Invalid signature.")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid signature"
+        )
 
-    # Decode and validate the JSON payload using the Pydantic model
+    # Decode the JSON payload
     try:
         payload = await request.json()
         logger.debug(f"Decoded JSON payload: {payload}")
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        logger.error(f"Could not decode JSON payload: {str(e)}\n{error_trace}")
+        notifier.notify_deploy_event("unknown", "unknown", "failed", "Invalid JSON payload.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload"
+        )
+
+    # Handle ping events separately
+    if x_github_event == "ping" or "zen" in payload:
+        logger.info("Received ping event from GitHub.")
+        return {"message": "Ping successful.", "zen": payload.get("zen")}
+
+    # Try parsing the payload into the GitHubWebhook model
+    try:
         webhook = GitHubWebhook(**payload)
         logger.debug(f"Parsed webhook payload: {webhook}")
     except Exception as e:
         error_trace = traceback.format_exc()
         logger.error(f"Invalid payload: {str(e)}\n{error_trace}")
         notifier.notify_deploy_event("unknown", "unknown", "failed", "Invalid payload.")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid payload"
+        )
 
-    # Extract repository full name from the payload and verify deployment configuration
+    # Extract repository full name and verify that it is configured for deployment
     repo_full_name = webhook.repository.get("full_name")
     logger.info(f"Received webhook for repository: {repo_full_name}")
 
     if repo_full_name not in REPO_DEPLOY_MAP:
-        message = f"Repository '{repo_full_name}' not configured for deployment"
+        message = f"Repository '{repo_full_name}' not configured for deployment."
         logger.warning(message)
         notifier.notify_deploy_event(repo_full_name, "unknown", "failed", message)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
 
     deploy_config = REPO_DEPLOY_MAP[repo_full_name]
     deploy_dir = deploy_config.get("deploy_dir")
@@ -61,7 +93,7 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
     force_rebuild = deploy_config.get("force_rebuild", False)
 
     if not deploy_dir:
-        message = f"Deploy directory not specified for repository '{repo_full_name}'"
+        message = f"Deploy directory not specified for repository '{repo_full_name}'."
         logger.error(message)
         notifier.notify_deploy_event(repo_full_name, branch, "failed", message)
         raise HTTPException(
@@ -70,8 +102,16 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
         )
 
     deploy_dir = os.path.abspath(deploy_dir)
+
+    # Ensure that the payload has a "ref" field
+    if not hasattr(webhook, "ref") and "ref" not in payload:
+        message = "Missing 'ref' field in payload."
+        logger.error(message)
+        notifier.notify_deploy_event(repo_full_name, "unknown", "failed", message)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
+
     # Determine which branch was pushed to
-    push_branch = webhook.ref.split('/')[-1]
+    push_branch = payload.get("ref", "").split('/')[-1]
     logger.info(f"Pushed to branch: {push_branch}")
 
     # If the pushed branch doesn't match the expected branch, skip deployment
@@ -108,9 +148,12 @@ async def handle_webhook(request: Request, x_hub_signature_256: str = Header(Non
         error_trace = traceback.format_exc()
         logger.error(f"Deployment failed: {str(e)}\n{error_trace}")
         notifier.notify_deploy_event(repo_full_name, branch, "failed", str(e))
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
     # If deployment is successful, notify and return a success message
-    logger.info("Deployment successful")
+    logger.info("Deployment successful.")
     notifier.notify_deploy_event(repo_full_name, branch, "successful", "Deployment completed successfully.")
-    return {"message": "Deployment successful"}
+    return {"message": "Deployment successful."}
