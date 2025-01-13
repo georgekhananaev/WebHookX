@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from dependencies import get_deploy_api_key
 from models.deploy_request import DeployRequest
-from utils import run_command, get_docker_compose_command
+from utils import run_command, get_docker_compose_command, restart_containers
 from config import REPO_DEPLOY_MAP
 from notifications import Notifications
 import os
@@ -22,11 +22,12 @@ def manual_deploy(deploy_request: DeployRequest, api_key: str = Depends(get_depl
     logger.info(f"Manual deployment triggered for repository: {repo_full_name}, branch: {branch}")
 
     if repo_full_name not in REPO_DEPLOY_MAP:
-        logger.warning(f"Repository '{repo_full_name}' not configured for deployment")
-        notifier.notify_deploy_event(repo_full_name, branch, "failed", "Repository not configured for deployment")
+        message = f"Repository '{repo_full_name}' not configured for deployment"
+        logger.warning(message)
+        notifier.notify_deploy_event(repo_full_name, branch, "failed", message)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Repository not configured for deployment"
+            detail=message
         )
 
     deploy_config = REPO_DEPLOY_MAP[repo_full_name]
@@ -35,11 +36,12 @@ def manual_deploy(deploy_request: DeployRequest, api_key: str = Depends(get_depl
     force_rebuild = deploy_config.get("force_rebuild", False)
 
     if not deploy_dir:
-        logger.error(f"Deploy directory not specified for repository '{repo_full_name}'")
-        notifier.notify_deploy_event(repo_full_name, branch, "failed", "Deploy directory not specified")
+        message = f"Deploy directory not specified for repository '{repo_full_name}'"
+        logger.error(message)
+        notifier.notify_deploy_event(repo_full_name, branch, "failed", message)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Deploy directory not specified for repository '{repo_full_name}'"
+            detail=message
         )
 
     deploy_dir = os.path.abspath(deploy_dir)
@@ -51,6 +53,7 @@ def manual_deploy(deploy_request: DeployRequest, api_key: str = Depends(get_depl
         return {"message": message}
 
     try:
+        # Pull the latest changes from git.
         git_command = f"git pull origin {branch}"
         logger.info(f"Running command: {git_command} in {deploy_dir}")
         git_stdout, git_stderr = run_command(git_command, cwd=deploy_dir)
@@ -59,16 +62,12 @@ def manual_deploy(deploy_request: DeployRequest, api_key: str = Depends(get_depl
             logger.info("No updates from git pull.")
             if force_rebuild:
                 logger.info("'force_rebuild' is enabled. Proceeding to rebuild Docker services.")
-                docker_up_command = get_docker_compose_command()
-                logger.info(f"Running command: {docker_up_command} in {deploy_dir}")
-                run_command(docker_up_command, cwd=deploy_dir)
+                restart_containers(deploy_dir)
             else:
                 logger.info("'force_rebuild' is disabled. Skipping Docker rebuild.")
         else:
             logger.info("Updates pulled from git. Proceeding to rebuild Docker services.")
-            docker_up_command = get_docker_compose_command()
-            logger.info(f"Running command: {docker_up_command} in {deploy_dir}")
-            run_command(docker_up_command, cwd=deploy_dir)
+            restart_containers(deploy_dir)
 
     except Exception as e:
         error_trace = traceback.format_exc()
