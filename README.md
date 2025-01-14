@@ -144,16 +144,16 @@ Body (JSON):
 
 ### Global Configuration
 
-| Variable                           | Type   | Usage                                                                                                 | Example                                                       |
-|------------------------------------|--------|-------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
-| `github_webhook_secret`            | String | A secure token used to verify the GitHub webhook signature. Must match the secret set in GitHub.      | `"your-webhook-secret"`                                       |
-| `docker_compose_options`           | String | Command-line options for Docker Compose (e.g., pulling images, building, running in detached mode).   | `"up -d --build --remove-orphans"`                            |
-| `docker_compose_path`              | String | The command or full path to your Docker Compose executable (e.g., if in PATH, use `"docker-compose"`).| `"docker-compose"`                                            |
-| `git_branch`                       | String | The default Git branch used when not otherwise specified in a repository configuration.               | `"main"`                                                      |
-| `deploy_api_key`                   | String | A secure API key for accessing manual deployment endpoints.                                           | `"deploy_API_key_ABC123XYZ"`                                  |
-| `tests_api_key`                    | String | A secure API key for accessing file listing or testing endpoints.                                     | `"tests_API_key_DEF456UVW"`                                   |
-| `log_level`                        | String | Sets the verbosity level for logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).               | `"INFO"`                                                      |
-| `max_retries`                      | Integer| Number of retries for failed tasks or requests before aborting.                                       | `3`                                                           |
+| Variable                           | Type    | Usage                                                                                                 | Example                                                       |
+|------------------------------------|---------|-------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| `github_webhook_secret`            | String  | A secure token used to verify the GitHub webhook signature. Must match the secret set in GitHub.      | `"deploy_API_key_ABC123XYZ"`                                  |
+| `docker_compose_options`           | String  | Command-line options for Docker Compose (e.g., pulling images, building, running in detached mode).   | `"up -d --build --remove-orphans"`                            |
+| `docker_compose_path`              | String  | The command or full path to your Docker Compose executable (e.g., if in PATH, use `"docker-compose"`).| `"docker-compose"`                                            |
+| `git_branch`                       | String  | The default Git branch used when not otherwise specified in a repository configuration.               | `"main"`                                                      |
+| `deploy_api_key`                   | String  | A secure API key for accessing manual deployment endpoints.                                           | `"deploy_API_key_ABC123XYZ"`                                  |
+| `tests_api_key`                    | String  | A secure API key for accessing file listing or testing endpoints.                                     | `"tests_DEF456UVW"`                                           |
+| `log_level`                        | String  | Sets the verbosity level for logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).               | `"INFO"`                                                      |
+| `max_retries`                      | Integer | Number of retries for failed tasks or requests before aborting.                                       | `3`                                                           |
 
 ---
 
@@ -185,6 +185,7 @@ Body (JSON):
 |---------------------------|----------------|-------------------------------------------------------------------------------------------------|--------------------------------------------|
 | `target`                  | String         | Specifies the deployment target: `local` for local execution, `remote` for remote via SSH.      | `"local"`                                  |
 | `clone_url`               | String         | The Git repository URL used to pull updates. (Often includes a Personal Access Token for private repos.) | `"https://yourPAT@github.com/your/repo.git"` |
+| `create_dir`              | Boolean        | Indicates whether to create the `deploy_dir` if it does not already exist.                      | `true`                                     |
 | `deploy_dir`              | String         | The directory path where the repository is deployed.                                            | `"/path/to/deploy"`                        |
 | `branch`                  | String         | The Git branch that triggers a deployment. Only deploys if the push event’s branch matches.     | `"main"`                                   |
 | `force_rebuild`           | Boolean        | Forces Docker rebuilds even when Git reports \"Already up to date.\"                            | `true`                                     |
@@ -195,10 +196,10 @@ Body (JSON):
 | Property     | Type   | Usage                                    | Example                  |
 |--------------|--------|------------------------------------------|--------------------------|
 | `host`       | String | The IP address or hostname of the remote server. | `"192.168.1.10"`         |
+| `port`       | Integer| The SSH port to connect to.              | `22`                     |
 | `user`       | String | The SSH username.                       | `"ubuntu"`               |
-| `key_type`   | String | The type of SSH private key: `"pem"` or `"pkk"`. | `"pem"`                  |
+| `key_type`   | String | The type of SSH private key: `"pem"` or `"ppk"`. | `"pem"`                  |
 | `key_path`   | String | The file path to the SSH private key.    | `"/path/to/key.pem"`     |
-
 
 ## Logs
 
