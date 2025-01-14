@@ -4,7 +4,7 @@
 
 WebHookX is a flexible deployment automation tool designed to simplify workflows. It integrates seamlessly with GitHub webhooks for automatic updates to staging or production environments with flexible logic and also supports manual deployments through API calls. With the ability to deploy across multiple servers—local or remote—it provides a robust framework for managing complex deployment scenarios. WebHookX allows chaining deployment events, executing custom commands post-deployment, and is built on Docker Compose, ensuring compatibility with modern CI/CD pipelines. Its modular design makes it suitable for automating diverse deployment processes efficiently and reliably.
 
-Note: WebHookX is under active development and may still contain bugs and incomplete logic. Ongoing improvements aim to enhance its stability, functionality, and overall reliability over time.
+_**Note:** WebHookX is under active development and may still contain bugs and incomplete logic. Ongoing improvements aim to enhance its stability, functionality, and overall reliability over time._
 
 ---
 
