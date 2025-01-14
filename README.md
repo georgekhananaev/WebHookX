@@ -150,7 +150,12 @@ Body (JSON):
 | `docker_compose_options`           | String | Command-line options for Docker Compose (e.g., pulling images, building, running in detached mode).   | `"up -d --build --remove-orphans"`                            |
 | `docker_compose_path`              | String | The command or full path to your Docker Compose executable (e.g., if in PATH, use `"docker-compose"`).| `"docker-compose"`                                            |
 | `git_branch`                       | String | The default Git branch used when not otherwise specified in a repository configuration.               | `"main"`                                                      |
-| `deploy_api_key` & `tests_api_key` | String | Secure API keys for accessing manual deployment and file listing endpoints.                          | `"deploy_API_key_ABC123XYZ"` <br> `"tests_API_key_DEF456UVW"` |
+| `deploy_api_key`                   | String | A secure API key for accessing manual deployment endpoints.                                           | `"deploy_API_key_ABC123XYZ"`                                  |
+| `tests_api_key`                    | String | A secure API key for accessing file listing or testing endpoints.                                     | `"tests_API_key_DEF456UVW"`                                   |
+| `log_level`                        | String | Sets the verbosity level for logging (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).               | `"INFO"`                                                      |
+| `max_retries`                      | Integer| Number of retries for failed tasks or requests before aborting.                                       | `3`                                                           |
+
+---
 
 ### Notifications Settings
 
@@ -172,6 +177,8 @@ Body (JSON):
 | `sender_email`    | String  | The email address used as the sender (can be the same as `username` or different).      | `"webhookx@example.com"`    |
 | `recipients`      | List    | A list of email addresses to send notifications to.                                     | `["recipient1@example.com", "recipient2@example.com"]` |
 
+---
+
 ### Repository Deployment Map (`repo_deploy_map`)
 
 | Property                  | Type           | Usage                                                                                           | Example                                    |
@@ -191,7 +198,6 @@ Body (JSON):
 | `user`       | String | The SSH username.                       | `"ubuntu"`               |
 | `key_type`   | String | The type of SSH private key: `"pem"` or `"pkk"`. | `"pem"`                  |
 | `key_path`   | String | The file path to the SSH private key.    | `"/path/to/key.pem"`     |
-
 
 
 ## Logs
