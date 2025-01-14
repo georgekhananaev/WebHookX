@@ -72,14 +72,6 @@ def deploy_local(server_info, repo_name, push_branch, notifier):
 
 
 def deploy_remote(server_info, repo_name, push_branch, notifier):
-    """
-    SSH into remote server, run git pull + docker logic, etc.
-    """
-    import logging
-    import paramiko
-
-    logger = logging.getLogger(__name__)
-
     host = server_info["host"]
     user = server_info["user"]
     key_type = server_info.get("key_type", "pem")
@@ -95,7 +87,7 @@ def deploy_remote(server_info, repo_name, push_branch, notifier):
     if key_type.lower() == "pem":
         private_key = paramiko.RSAKey.from_private_key_file(key_path)
     elif key_type.lower() == "ppk":
-        private_key = paramiko.RSAKey.from_private_key_file(key_path)  # Use .ppk as is
+        private_key = paramiko.RSAKey.from_private_key_file(key_path)
     else:
         raise ValueError(f"Unsupported key_type '{key_type}'. Use 'pem' or 'ppk'.")
 
@@ -105,13 +97,10 @@ def deploy_remote(server_info, repo_name, push_branch, notifier):
 
         # 1) Git pull
         git_cmd = f"cd {deploy_dir} && git pull origin {branch}"
-        pull_output = _exec_ssh_command(ssh_client, git_cmd)  # Capture output
+        pull_output = _exec_ssh_command(ssh_client, git_cmd)
         logger.debug(f"Remote pull output: {pull_output}")
 
-        # 2) Determine if we should do a full Docker rebuild (down + up --build)
-        #    or just skip it. This matches your local logic:
-        #    - If "Already up to date." is NOT found or force_rebuild is True, do a rebuild
-        #    - Otherwise skip.
+        # 2) Should we do a full Docker rebuild?
         do_rebuild = force_rebuild or ("Already up to date." not in pull_output)
 
         if do_rebuild:
@@ -119,23 +108,23 @@ def deploy_remote(server_info, repo_name, push_branch, notifier):
         else:
             logger.info("No changes found on remote, skipping Docker rebuild...")
 
-        # Check if Linux for sudo
+        # Determine if we need sudo
         os_check_cmd = "uname -s"
         stdin, stdout, stderr = ssh_client.exec_command(os_check_cmd)
         os_type = stdout.read().decode().strip()
         docker_prefix = "sudo " if os_type == "Linux" else ""
 
         if do_rebuild:
-            # EXACT same logic as local "restart_containers":
             # Step A: docker-compose down
+            # (use allow_benign_errors=True to skip 'no containers' errors)
             down_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose down --remove-orphans"
-            _exec_ssh_command(ssh_client, down_cmd)
+            _exec_ssh_command(ssh_client, down_cmd, allow_benign_errors=True)
 
             # Step B: docker-compose up -d --build
             up_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose up -d --build --remove-orphans"
             _exec_ssh_command(ssh_client, up_cmd)
         else:
-            # If skipping rebuild, at least ensure containers are up:
+            # If skipping rebuild, just ensure containers are up
             up_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose up -d"
             _exec_ssh_command(ssh_client, up_cmd)
 
@@ -187,9 +176,11 @@ def run_remote_tasks(tasks, server_info, notifier, repo_name, push_branch):
         ssh_client.close()
 
 
-def _exec_ssh_command(ssh_client, cmd, timeout=30):
+def _exec_ssh_command(ssh_client, cmd, timeout=30, allow_benign_errors=False):
     """
-    Execute an SSH command and return its output. Handle commands that produce continuous or large output.
+    Execute an SSH command and return its output. If the command fails with
+    a non-zero exit code, raise RuntimeError unless we detect known benign errors
+    (when allow_benign_errors=True).
     """
     stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=timeout)
 
@@ -208,11 +199,25 @@ def _exec_ssh_command(ssh_client, cmd, timeout=30):
             logger.warning(f"[SSH STDERR] {error.strip()}")
 
     exit_status = stdout.channel.recv_exit_status()
+    full_error_output = "".join(error_lines).strip()
 
     if exit_status != 0:
-        raise RuntimeError(
-            f"Command '{cmd}' failed with exit code {exit_status}. "
-            f"Error: {''.join(error_lines).strip()}"
-        )
+        # Check if we should ignore known "benign" errors
+        # e.g. "No container found", "No containers to remove", "has active endpoints"
+        benign_markers = [
+            "No container found",
+            "No containers to remove",
+            "has active endpoints",
+            # Add more as needed
+        ]
+
+        # If we're allowed to skip these errors and the error text matches
+        if allow_benign_errors and any(marker in full_error_output for marker in benign_markers):
+            logger.warning(f"Ignoring benign error while running '{cmd}': {full_error_output}")
+        else:
+            raise RuntimeError(
+                f"Command '{cmd}' failed with exit code {exit_status}. "
+                f"Error: {full_error_output}"
+            )
 
     return "".join(output_lines).strip()

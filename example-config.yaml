@@ -20,6 +20,7 @@ repo_deploy_map:
 
     server2:
       target: "remote"
+      clone_url: "https://ghp_yourGitHubPAT@github.com/username/sample-backend.git"
       host: "1.2.3.4"
       user: "ubuntu"
       key_type: "pem"   # or "pkk"
@@ -49,7 +50,7 @@ git_branch: "main"
 deploy_api_key: "deploy_API_key_ABC123XYZ"
 
 # API key for listing files and testing commands.
-list_files_api_key: "list_files_API_key_DEF456UVW"
+tests_api_key: "tests_API_key_DEF456UVW"
 
 # Notifications
 notifications:
@@ -64,3 +65,5 @@ notifications:
     recipients:
       - "recipient1@gmail.com"
       - "recipient2@gmail.com"
+
+debug: false # Set to true for debugging logs

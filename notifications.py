@@ -1,3 +1,5 @@
+# notifications.py
+
 import smtplib
 import requests
 import yaml
@@ -6,9 +8,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional
 
-from logging_config import setup_logging
-
-setup_logging()
 logger = logging.getLogger(__name__)
 
 

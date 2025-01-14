@@ -144,13 +144,13 @@ Body (JSON):
 
 ### Global Configuration
 
-| Variable                         | Type   | Usage                                                                                                 | Example                                      |
-|----------------------------------|--------|-------------------------------------------------------------------------------------------------------|----------------------------------------------|
-| `github_webhook_secret`          | String | A secure token used to verify the GitHub webhook signature. Must match the secret set in GitHub.      | `"your-webhook-secret"`                      |
-| `docker_compose_options`         | String | Command-line options for Docker Compose (e.g., pulling images, building, running in detached mode).   | `"up -d --build --remove-orphans"`           |
-| `docker_compose_path`            | String | The command or full path to your Docker Compose executable (e.g., if in PATH, use `"docker-compose"`).| `"docker-compose"`                           |
-| `git_branch`                     | String | The default Git branch used when not otherwise specified in a repository configuration.               | `"main"`                                     |
-| `deploy_api_key` & `list_files_api_key` | String | Secure API keys for accessing manual deployment and file listing endpoints.                          | `"deploy_API_key_ABC123XYZ"` <br> `"list_files_API_key_DEF456UVW"` |
+| Variable                           | Type   | Usage                                                                                                 | Example                                                       |
+|------------------------------------|--------|-------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| `github_webhook_secret`            | String | A secure token used to verify the GitHub webhook signature. Must match the secret set in GitHub.      | `"your-webhook-secret"`                                       |
+| `docker_compose_options`           | String | Command-line options for Docker Compose (e.g., pulling images, building, running in detached mode).   | `"up -d --build --remove-orphans"`                            |
+| `docker_compose_path`              | String | The command or full path to your Docker Compose executable (e.g., if in PATH, use `"docker-compose"`).| `"docker-compose"`                                            |
+| `git_branch`                       | String | The default Git branch used when not otherwise specified in a repository configuration.               | `"main"`                                                      |
+| `deploy_api_key` & `tests_api_key` | String | Secure API keys for accessing manual deployment and file listing endpoints.                          | `"deploy_API_key_ABC123XYZ"` <br> `"tests_API_key_DEF456UVW"` |
 
 ### Notifications Settings
 

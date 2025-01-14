@@ -1,9 +1,12 @@
+# main.py
+
 import logging
 from fastapi import FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
 
+from config import DEBUG_MODE
 from logging_config import setup_logging
 
 # Routers
@@ -12,7 +15,9 @@ from routers.tests import router as test_command_router
 from routers.webhook import router as webhook_router
 from routers.deploy import router as deploy_router
 
-setup_logging()
+# Initialize logging once
+setup_logging(DEBUG_MODE)
+
 logger = logging.getLogger(__name__)
 logger.info("Starting the WebHookX application...")
 
@@ -20,15 +25,13 @@ app = FastAPI(
     title="WebHookX",
     description="Automated GitHub Repository Deployment Tool with Multi-Server Chain",
     version="1.0.0",
-    docs_url=None,  # Disable default /docs
-    redoc_url=None,  # Disable default /redoc
-    openapi_url=None  # Disable default /openapi.json
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None
 )
 
-# Static folder for swagger dark theme
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Include routers
 app.include_router(health_router)
 app.include_router(test_command_router)
 app.include_router(webhook_router)

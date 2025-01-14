@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  webhookx:
+    container_name: webhookx
+    build: .
+    ports:
+      - "51122:51122"
+    # If you need environment variables, volumes, etc., add them here
+    # volumes:
+    #   - .:/app
+    # environment:
+    #   - CONFIG_PATH=/app/config.yaml
+    #   - LOG_DB_PATH=/app/logs.db
+    # ...
+    # Alternatively, you can rely on defaults in your code

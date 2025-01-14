@@ -1,17 +1,16 @@
+# config.py
+
 import os
 import yaml
 import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 logger = logging.getLogger(__name__)
 
 
 def load_config():
     """
-    Load configuration from the YAML file specified by CONFIG_PATH environment variable or the default path.
+    Load configuration from the YAML file specified by CONFIG_PATH
+    environment variable or the default path.
     """
     CONFIG_PATH = os.getenv("CONFIG_PATH", "config.yaml")
 
@@ -36,6 +35,8 @@ def load_config():
 config = load_config()
 
 # Extract essential settings
+DEBUG_MODE = config.get("debug", False)  # <--- NEW
+
 WEBHOOK_SECRET = config.get("github_webhook_secret", "")
 REPO_DEPLOY_MAP = config.get("repo_deploy_map", {})
 
@@ -44,21 +45,18 @@ DOCKER_COMPOSE_PATH = config.get("docker_compose_path", "docker-compose")
 GIT_BRANCH = config.get("git_branch", "main")
 
 DEPLOY_API_KEY = config.get("deploy_api_key", "")
-LIST_FILES_API_KEY = config.get("list_files_api_key", "")
+TESTS_API_KEY = config.get("tests_api_key", "")
 
-# Notification settings
 NOTIFICATIONS = config.get("notifications", {})
 SLACK_WEBHOOK = NOTIFICATIONS.get("slack_webhook_url", "")
 EMAIL_SETTINGS = NOTIFICATIONS.get("email", {})
 
-# Override environment variables
 EMAIL_SETTINGS['password'] = os.getenv("EMAIL_PASSWORD", EMAIL_SETTINGS.get('password'))
 EMAIL_SETTINGS['username'] = os.getenv("EMAIL_USERNAME", EMAIL_SETTINGS.get('username'))
 EMAIL_SETTINGS['smtp_server'] = os.getenv("SMTP_SERVER", EMAIL_SETTINGS.get('smtp_server'))
 EMAIL_SETTINGS['smtp_port'] = int(os.getenv("SMTP_PORT", EMAIL_SETTINGS.get('smtp_port', 587)))
 EMAIL_SETTINGS['use_tls'] = os.getenv("EMAIL_USE_TLS", str(EMAIL_SETTINGS.get('use_tls', True))).lower() == "true"
 
-# Validate email configuration
 if not EMAIL_SETTINGS.get('username') or not EMAIL_SETTINGS.get('password'):
     logger.warning("Email username or password is missing. Email notifications may fail.")
 if not EMAIL_SETTINGS.get('recipients'):

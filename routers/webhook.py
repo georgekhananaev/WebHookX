@@ -1,3 +1,5 @@
+# webhook.py is the FastAPI router for handling GitHub webhook events.
+
 import logging
 import traceback
 import json
