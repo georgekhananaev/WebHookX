@@ -1,9 +1,12 @@
+# Filename: deploy_chain.py
+
 import logging
 import os
 import paramiko
 from utils import run_command, restart_containers
 
 logger = logging.getLogger(__name__)
+
 
 def deploy_chain(repo_name: str, push_branch: str, servers_config: dict, notifier):
     """
@@ -50,10 +53,9 @@ def deploy_chain(repo_name: str, push_branch: str, servers_config: dict, notifie
 
             logger.info(f"=== Finished {server_key} ===\n")
         except Exception as e:
-            # If any error happens for this server, we log it and move on (or re-raise if you want to stop the chain).
+            # If any error happens for this server, log it. (You can re-raise if desired.)
             logger.error(f"Deployment failed on {server_key}: {e}")
-            # You might want to raise here to stop the chain entirely
-            # raise
+            # raise  # <- Uncomment if you want to stop the entire chain on first error.
 
 
 # -------------------------------------------------------------------
@@ -81,7 +83,7 @@ def deploy_local(server_info, repo_name, push_branch, notifier):
 
         # Step 3: Rebuild if needed
         if "Already up to date." not in out or force_rebuild:
-            restart_containers(deploy_dir)  # calls docker-compose down/up
+            restart_containers(deploy_dir)  # calls docker-compose down/up internally
         else:
             logger.info("No changes found locally, skipping Docker rebuild.")
 
@@ -131,7 +133,7 @@ def deploy_remote(server_info, repo_name, push_branch, notifier):
     """
     1) Ensure the repo directory is present on remote or clone if needed.
     2) Git pull from the existing directory.
-    3) If changes found or force_rebuild, docker-compose down/up.
+    3) If changes found or force_rebuild, docker-compose down/up with sudo if needed.
     """
     host = server_info["host"]
     port = server_info.get("port", 22)
@@ -175,11 +177,12 @@ def deploy_remote(server_info, repo_name, push_branch, notifier):
         else:
             logger.info("No changes found on remote, skipping Docker rebuild...")
 
-        # Figure out Docker compose command and whether to use sudo
+        # Detect which docker-compose tool is installed (docker-compose vs docker compose)
         docker_compose_bin = _detect_docker_compose_binary(ssh_client)
+
+        # Check OS to see if we need sudo
         os_type = _exec_ssh_command(ssh_client, "uname -s").strip()
         docker_prefix = ""
-        # If Linux, we generally can prefix with sudo
         if "Linux" in os_type:
             docker_prefix = "sudo "
 
@@ -245,20 +248,20 @@ def _ensure_remote_repo(ssh_client, deploy_dir: str, clone_url: str, create_dir:
 # -------------------------------------------------------------------
 def _detect_docker_compose_binary(ssh_client) -> str:
     """
-    Checks for 'docker-compose' vs 'docker compose' on the remote machine.
+    Checks for 'docker compose' vs 'docker-compose' on the remote machine.
     Returns whichever is found first (prefers 'docker compose' if possible).
+    Raises an error if neither is installed.
     """
-    # Try 'docker compose' (v2)
+    # Try 'docker compose' (v2) first
     try:
         _exec_ssh_command(ssh_client, "which docker", timeout=5)
-        # We only attempt 'docker compose version' if 'docker' is found
         version_out = _exec_ssh_command(ssh_client, "docker compose version", timeout=5)
         if "Docker Compose version" in version_out:
             return "docker compose"
     except Exception as e:
-        logger.debug(f"'docker compose' not found or failed: {e}")
+        logger.debug(f"'docker compose' not found or not working: {e}")
 
-    # Fallback to 'docker-compose'
+    # Fallback to 'docker-compose' (v1)
     try:
         _exec_ssh_command(ssh_client, "which docker-compose", timeout=5)
         return "docker-compose"
@@ -324,7 +327,7 @@ def _exec_ssh_command(ssh_client, cmd, timeout=30, allow_benign_errors=False):
     output_lines = []
     error_lines = []
 
-    # Read continuously until command finishes
+    # Continuously read from stdout/stderr until command completes
     while not stdout.channel.exit_status_ready():
         if stdout.channel.recv_ready():
             output = stdout.channel.recv(1024).decode()
