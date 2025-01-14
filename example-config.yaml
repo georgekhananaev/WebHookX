@@ -1,61 +1,69 @@
 # config.yaml
 
 # Webhook secret for verifying GitHub signatures.
-# Set this to a secure random string and configure the same in your GitHub webhook settings.
 github_webhook_secret: "your_secure_webhook_secret"
 
 # Mapping of GitHub repository full names to their respective deployment configurations.
+# Each repository can have multiple servers: server1, server2, etc.
 repo_deploy_map:
   "username/sample-backend":
-    clone_url: "https://ghp_yourGitHubPAT@github.com/username/sample-backend.git"
-    deploy_dir: "/var/www/deployments/sample-backend"
-    branch: "main"
-    force_rebuild: false
+    server1:
+      target: "local"
+      clone_url: "https://ghp_yourGitHubPAT@github.com/username/sample-backend.git"
+      deploy_dir: "/var/www/deployments/sample-backend"
+      branch: "main"
+      force_rebuild: false
+      additional_terminal_tasks:
+        - "ping -c 3 google.com"
+        - "ls -la"
+        - "cd frontend && npm install && npm run build"
 
-  "username/sample-frontend":
-    clone_url: "https://ghp_yourGitHubPAT@github.com/username/sample-frontend.git"
-    deploy_dir: "/var/www/deployments/sample-frontend"
-    branch: "develop"
-    force_rebuild: true
+    server2:
+      target: "remote"
+      clone_url: "https://ghp_yourGitHubPAT@github.com/username/sample-backend.git"
+      host: "1.2.3.4"
+      user: "ubuntu"
+      key_type: "pem"   # or "pkk"
+      key_path: "/path/to/ssh-key.pem"
+      deploy_dir: "/home/ubuntu/sample-backend"
+      branch: "main"
+      force_rebuild: true
+      additional_terminal_tasks:
+        - "cd /home/ubuntu/sample-backend/frontend && npm install && npm run build"
+        - "echo 'Finished remote tasks.'"
 
-  "organization/example-service":
-    clone_url: "https://ghp_yourGitHubPAT@github.com/organization/example-service.git"
-    deploy_dir: "/opt/services/example-service"
-    branch: "release"
-    force_rebuild: false
+  # You can add more repos in a similar structure
+  # "organization/example-service":
+  #   server1: ...
+  #   server2: ...
 
-# Docker Compose command options.
-# Adjust these options based on your deployment needs.
+# Docker Compose command options (used by local code in utils.py).
 docker_compose_options: "up -d --build --remove-orphans"
 
-# Path to the Docker Compose executable.
-# If Docker Compose is in your system's PATH, you can leave this as is.
-docker_compose_path: "docker-compose" # or something like this, if you want to specific the location "/usr/local/bin/docker-compose"
+# Path to Docker Compose executable.
+docker_compose_path: "docker-compose"
 
-# Default Git branch to pull from if different from the deploy_branch specified in repo_deploy_map.
-# This is optional and can be omitted if not needed.
+# Default Git branch if needed.
 git_branch: "main"
 
 # API key for manual deployments.
-# Use a strong, unique key to secure the /deploy endpoint.
 deploy_api_key: "deploy_API_key_ABC123XYZ"
 
 # API key for listing files and testing commands.
-# Use a separate key to secure the /list-files and /test-command endpoints.
-list_files_api_key: "list_files_API_key_DEF456UVW"
+tests_api_key: "tests_API_key_DEF456UVW"
 
-# Optional: Notifications settings.
-# You can configure either Slack or Email notifications or both.
-# Gmail is just an example. You can use any SMTP server.
+# Notifications
 notifications:
   slack_webhook_url: ""
   email:
     smtp_server: "smtp.gmail.com"
     smtp_port: 587  # Use 465 for SSL
-    use_tls: true  # Set to false if using SSL (port 465)
+    use_tls: true   # false if using SSL with port 465
     username: "<your_email_name>@gmail.com"
     password: "example_password_of_gmail_smtp"
-    sender_email: "<your_email_name>@gmail.com"  # Optional: If different from username
+    sender_email: "<your_email_name>@gmail.com"
     recipients:
       - "recipient1@gmail.com"
       - "recipient2@gmail.com"
+
+debug: false # Set to true for debugging logs

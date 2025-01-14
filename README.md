@@ -140,6 +140,60 @@ Body (JSON):
 
 ---
 
+## Usage and Variables Documentation
+
+### Global Configuration
+
+| Variable                           | Type   | Usage                                                                                                 | Example                                                       |
+|------------------------------------|--------|-------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| `github_webhook_secret`            | String | A secure token used to verify the GitHub webhook signature. Must match the secret set in GitHub.      | `"your-webhook-secret"`                                       |
+| `docker_compose_options`           | String | Command-line options for Docker Compose (e.g., pulling images, building, running in detached mode).   | `"up -d --build --remove-orphans"`                            |
+| `docker_compose_path`              | String | The command or full path to your Docker Compose executable (e.g., if in PATH, use `"docker-compose"`).| `"docker-compose"`                                            |
+| `git_branch`                       | String | The default Git branch used when not otherwise specified in a repository configuration.               | `"main"`                                                      |
+| `deploy_api_key` & `tests_api_key` | String | Secure API keys for accessing manual deployment and file listing endpoints.                          | `"deploy_API_key_ABC123XYZ"` <br> `"tests_API_key_DEF456UVW"` |
+
+### Notifications Settings
+
+#### Slack
+
+| Variable                     | Type   | Usage                                                   | Example                                      |
+|------------------------------|--------|---------------------------------------------------------|----------------------------------------------|
+| `notifications.slack_webhook_url` | String | URL used for sending Slack notifications.                | `"https://hooks.slack.com/services/your/slack/webhook"` |
+
+#### Email
+
+| Property         | Type    | Usage                                                                                   | Example                     |
+|-------------------|---------|-----------------------------------------------------------------------------------------|-----------------------------|
+| `smtp_server`     | String  | SMTP server host.                                                                       | `"smtp.gmail.com"`          |
+| `smtp_port`       | Integer | SMTP port (e.g., `465` for SSL or `587` for TLS).                                       | `465`                       |
+| `use_tls`         | Boolean | Set to `true` if using TLS (typically for port 587) or `false` for SSL (port 465).      | `false`                     |
+| `username`        | String  | Credentials for your email account.                                                    | `"your-email@gmail.com"`    |
+| `password`        | String  | Password for your email account.                                                       | `"your-email-password"`     |
+| `sender_email`    | String  | The email address used as the sender (can be the same as `username` or different).      | `"webhookx@example.com"`    |
+| `recipients`      | List    | A list of email addresses to send notifications to.                                     | `["recipient1@example.com", "recipient2@example.com"]` |
+
+### Repository Deployment Map (`repo_deploy_map`)
+
+| Property                  | Type           | Usage                                                                                           | Example                                    |
+|---------------------------|----------------|-------------------------------------------------------------------------------------------------|--------------------------------------------|
+| `target`                  | String         | Specifies the deployment target: `local` for local execution, `remote` for remote via SSH.      | `"local"`                                  |
+| `clone_url`               | String         | The Git repository URL used to pull updates. (Often includes a Personal Access Token for private repos.) | `"https://yourPAT@github.com/your/repo.git"` |
+| `deploy_dir`              | String         | The directory path where the repository is deployed.                                            | `"/path/to/deploy"`                        |
+| `branch`                  | String         | The Git branch that triggers a deployment. Only deploys if the push event’s branch matches.     | `"main"`                                   |
+| `force_rebuild`           | Boolean        | Forces Docker rebuilds even when Git reports \"Already up to date.\"                            | `true`                                     |
+| `additional_terminal_tasks` | List of Strings | Extra shell commands to execute after the main deployment steps.                                | `["cd frontend && ping -n 3 google.com"]`  |
+
+#### For Remote Targets
+
+| Property     | Type   | Usage                                    | Example                  |
+|--------------|--------|------------------------------------------|--------------------------|
+| `host`       | String | The IP address or hostname of the remote server. | `"192.168.1.10"`         |
+| `user`       | String | The SSH username.                       | `"ubuntu"`               |
+| `key_type`   | String | The type of SSH private key: `"pem"` or `"pkk"`. | `"pem"`                  |
+| `key_path`   | String | The file path to the SSH private key.    | `"/path/to/key.pem"`     |
+
+
+
 ## Logs
 
 WebHookX stores logs in a local SQLite database (`logs.db`). This keeps everything lightweight and easy to manage.
