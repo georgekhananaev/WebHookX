@@ -178,7 +178,7 @@ def _check_server_remote(server_info: dict):
 #
 # 3) /list-files endpoint
 #
-@router.get("/test-list-files", summary="List local & remote files for a given repository")
+@router.get("/test-directories", summary="List local & remote files for a given repository")
 def list_files(
         repository_full_name: str,
         api_key: str = Depends(get_tests_api_key)
