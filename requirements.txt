@@ -1,7 +1,7 @@
 fastapi~=0.115.6
 PyYAML~=6.0.2
-pydantic~=2.10.5
 requests~=2.32.3
-pyyaml~=6.0.2
 paramiko~=3.5.0
 uvicore~=0.2.8
+uvicorn~=0.22.0
+pydantic
