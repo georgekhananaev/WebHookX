@@ -189,8 +189,8 @@ Body (JSON):
 | `deploy_dir`              | String         | The directory path where the repository is deployed.                                                     | `"/path/to/deploy"`                        |
 | `branch`                  | String         | The Git branch that triggers a deployment. Only deploys if the push event’s branch matches.              | `"main"`                                   |
 | `force_rebuild`           | Boolean        | Forces Docker rebuilds even when Git reports \"Already up to date.\"                                     | `true`                                     |
-| `additional_tasks_only`     | Boolean         | Once enabledm, it skips the built and running additional_terminal_tasks commands only.                | `true`                                     |
-| `additional_terminal_tasks` | List of Strings | Extra shell commands to execute after the main deployment steps.                                      | `["cd frontend && ping -n 3 google.com"]`  |
+| `additional_tasks_only`     | Boolean         | Once enabled, it skips the built and running additional_terminal_tasks commands only.                    | `true`                                     |
+| `additional_terminal_tasks` | List of Strings | Extra shell commands to execute after the main deployment steps.                                         | `["cd frontend && ping -n 3 google.com"]`  |
 
 #### For Remote Targets
 
