@@ -28,14 +28,11 @@ repo_deploy_map:
       deploy_dir: "/home/ubuntu/sample-backend"
       branch: "main"
       force_rebuild: true
+      sudo: true # Optional: Run commands with sudo privileges, if needed
+      additional_tasks_only: false # Set to true to run only additional_terminal_tasks
       additional_terminal_tasks:
         - "cd /home/ubuntu/sample-backend/frontend && npm install && npm run build"
         - "echo 'Finished remote tasks.'"
-
-  # You can add more repos in a similar structure
-  # "organization/example-service":
-  #   server1: ...
-  #   server2: ...
 
 # Docker Compose command options (used by local code in utils.py).
 docker_compose_options: "up -d --build --remove-orphans"

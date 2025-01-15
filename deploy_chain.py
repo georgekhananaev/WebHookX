@@ -1,208 +1,245 @@
-# Filename: deploy_chain.py
-
 import logging
 import os
+import time
 import paramiko
 from utils import run_command  # Removed restart_containers since we'll handle locally
 
 logger = logging.getLogger(__name__)
 
-
 def deploy_chain(repo_name: str, push_branch: str, servers_config: dict, notifier):
     """
-    Iterates over server1, server2, ... in servers_config
-    and deploys each one sequentially.
+    Iterates over server definitions in servers_config and deploys sequentially.
+    If `additional_tasks_only` is true in a server's config, skips all fetch/clone/docker-compose steps
+    and executes only the additional_terminal_tasks.
     """
     server_keys = sorted(servers_config.keys())
     for server_key in server_keys:
+        if not server_key.startswith("server"):
+            logger.info(f"Skipping '{server_key}' as it's not a server definition.")
+            continue
+
         server_info = servers_config[server_key]
         logger.info(f"=== Deploying {server_key} for repo '{repo_name}' ===")
 
-        # Skip non-"serverX" keys
-        if not server_key.startswith("server"):
-            logger.info(f"Skipping '{server_key}' as it's not recognized as a server definition.")
-            continue
-
+        # Check branch match
         config_branch = server_info.get("branch", "main")
         if push_branch != config_branch:
-            msg = f"Push branch '{push_branch}' does not match '{config_branch}'. Skipping {server_key}."
+            msg = (
+                f"Push branch '{push_branch}' does not match configured branch "
+                f"'{config_branch}'. Skipping {server_key}."
+            )
             logger.info(msg)
             notifier.notify_deploy_event(repo_name, push_branch, "ignored", msg)
             continue
 
         try:
+            additional_tasks_only = server_info.get("additional_tasks_only", False)
             target = server_info.get("target")
-            if target == "local":
-                deploy_local(server_info, repo_name, push_branch, notifier)
-            elif target == "remote":
-                deploy_remote(server_info, repo_name, push_branch, notifier)
-            else:
-                msg = f"Unknown target '{target}' for {server_key}. Skipping."
-                logger.warning(msg)
-                notifier.notify_deploy_event(repo_name, push_branch, "failed", msg)
-                continue
 
-            # Optional additional tasks
+            # If additional_tasks_only is enabled, skip main deployment steps.
+            if not additional_tasks_only:
+                if target == "local":
+                    deploy_local(server_info, repo_name, push_branch, notifier)
+                elif target == "remote":
+                    deploy_remote(server_info, repo_name, push_branch, notifier)
+                else:
+                    msg = f"Unknown target '{target}' for {server_key}. Skipping."
+                    logger.warning(msg)
+                    notifier.notify_deploy_event(repo_name, push_branch, "failed", msg)
+                    continue
+            else:
+                logger.info(f"additional_tasks_only is enabled for {server_key}; skipping fetch/clone/docker operations.")
+
+            # Execute additional tasks (if any)
             tasks = server_info.get("additional_terminal_tasks", [])
             if tasks:
                 if target == "local":
                     run_local_tasks(tasks, server_info.get("deploy_dir"), notifier, repo_name, push_branch)
-                else:
+                elif target == "remote":
                     run_remote_tasks(tasks, server_info, notifier, repo_name, push_branch)
+                else:
+                    # When target is not specified, run tasks locally in the current working directory.
+                    run_local_tasks(tasks, os.getcwd(), notifier, repo_name, push_branch)
 
-            logger.info(f"=== Finished {server_key} ===\n")
+            logger.info(f"=== Finished deployment for {server_key} ===\n")
         except Exception as e:
-            logger.error(f"Deployment failed on {server_key}: {e}")
-            # Uncomment raise if you want to stop on first error.
-            # raise
+            logger.error(f"Deployment failed on {server_key}: {e}", exc_info=True)
+            notifier.notify_deploy_event(repo_name, push_branch, "failed", str(e))
+            # Optionally, decide whether to continue with other servers or abort.
+            # continue
 
 
-# -------------------------------------------------------------------
-# LOCAL DEPLOY
-# -------------------------------------------------------------------
+# ===================================================================
+# LOCAL DEPLOYMENT
+# ===================================================================
 def deploy_local(server_info, repo_name, push_branch, notifier):
     """
-    1) Ensure the repo directory is present or create/clone it.
-    2) Perform 'git pull' from that directory.
-    3) If changes found or force_rebuild, rebuild containers with sudo if configured.
+    Executes local deployment steps:
+      1) Ensures the repository directory exists (or clones if allowed)
+      2) Pulls updates from git
+      3) Rebuilds containers if changes are detected or forced.
     """
+    deploy_dir = server_info.get("deploy_dir")
+    branch = server_info.get("branch", "main")
+    clone_url = server_info.get("clone_url")
+    create_dir = server_info.get("create_dir", False)
+    force_rebuild = server_info.get("force_rebuild", False)
+    use_sudo = server_info.get("sudo", False)
+
     try:
-        deploy_dir = server_info["deploy_dir"]
-        branch = server_info.get("branch", "main")
-        clone_url = server_info.get("clone_url")
-        create_dir = server_info.get("create_dir", False)
-        force_rebuild = server_info.get("force_rebuild", False)
-        use_sudo = server_info.get("sudo", False)  # Read sudo flag from config
-
         _ensure_local_repo(deploy_dir, clone_url, create_dir, branch)
-
-        # Step 2: Git Pull
-        git_cmd = f"git pull origin {branch}"
-        out, err = run_command(git_cmd, cwd=deploy_dir)
-        logger.info(out)
-
-        # Step 3: Rebuild if needed.
-        if "Already up to date." not in out or force_rebuild:
-            docker_prefix = "sudo " if use_sudo else ""
-            # Execute docker-compose down and up commands using run_command.
-            down_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose down --remove-orphans"
-            logger.info(f"Running local down command: {down_cmd}")
-            run_command(down_cmd, cwd=deploy_dir)
-
-            up_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose up -d --build --remove-orphans"
-            logger.info(f"Running local up command: {up_cmd}")
-            run_command(up_cmd, cwd=deploy_dir)
-        else:
-            logger.info("No changes found locally, skipping Docker rebuild.")
-
-        notifier.notify_deploy_event(repo_name, push_branch, "successful", "Local deployment completed.")
     except Exception as e:
-        logger.error(f"Local deploy error: {e}")
-        notifier.notify_deploy_event(repo_name, push_branch, "failed", str(e))
-        raise
+        raise RuntimeError(f"Failed to ensure local repository at {deploy_dir}: {e}")
+
+    # Pull latest changes
+    git_pull_cmd = f"git pull origin {branch}"
+    out, err = run_command(git_pull_cmd, cwd=deploy_dir)
+    logger.info(f"Git pull output:\n{out}")
+    if err:
+        logger.warning(f"Git pull stderr:\n{err}")
+
+    # Determine if rebuild is necessary
+    if "Already up to date." in out and not force_rebuild:
+        logger.info("No changes found locally. Skipping docker-compose rebuild.")
+    else:
+        logger.info("Changes detected or forced rebuild. Starting container rebuild...")
+
+        docker_prefix = ""
+        if use_sudo:
+            if _can_run_sudo_local():
+                docker_prefix = "sudo "
+            else:
+                logger.warning("Sudo requested but not available locally. Proceeding without sudo.")
+
+        down_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose down --remove-orphans"
+        logger.info(f"Running local down command: {down_cmd}")
+        run_command(down_cmd, cwd=deploy_dir)
+
+        up_cmd = f"cd {deploy_dir} && {docker_prefix}docker-compose up -d --build --remove-orphans"
+        logger.info(f"Running local up command: {up_cmd}")
+        run_command(up_cmd, cwd=deploy_dir)
+
+    notifier.notify_deploy_event(repo_name, push_branch, "successful", "Local deployment completed.")
 
 
 def _ensure_local_repo(deploy_dir: str, clone_url: str, create_dir: bool, branch: str):
     """
-    Checks if 'deploy_dir' exists locally. If not:
-      - If create_dir is False: raise an error.
-      - If create_dir is True: 'git clone' from clone_url into that path.
+    Ensures that the local deployment directory exists. Clones if needed.
     """
     if os.path.isdir(deploy_dir):
-        logger.info(f"Local directory '{deploy_dir}' already exists.")
+        logger.info(f"Local directory already exists: {deploy_dir}")
         return
 
     if not create_dir:
         msg = (
-            f"Directory '{deploy_dir}' does not exist locally. "
-            f"Set 'create_dir: true' if you want to attempt creating and cloning the repository."
+            f"Directory '{deploy_dir}' does not exist. "
+            "Set 'create_dir: true' to clone repository automatically."
         )
         raise FileNotFoundError(msg)
 
     if not clone_url:
-        raise ValueError(f"'clone_url' is not specified, cannot clone into '{deploy_dir}'.")
+        raise ValueError(f"'clone_url' must be specified to clone into '{deploy_dir}'.")
 
     parent_dir = os.path.dirname(deploy_dir)
     if parent_dir and not os.path.isdir(parent_dir):
-        logger.info(f"Creating local parent directory: {parent_dir}")
+        logger.info(f"Creating parent directory: {parent_dir}")
         os.makedirs(parent_dir, exist_ok=True)
 
     clone_cmd = f"git clone --branch {branch} {clone_url} \"{deploy_dir}\""
-    logger.info(f"Local directory '{deploy_dir}' not found. Cloning: {clone_cmd}")
+    logger.info(f"Cloning repository with command: {clone_cmd}")
     run_command(clone_cmd, cwd=parent_dir or ".")
 
 
-# -------------------------------------------------------------------
-# REMOTE DEPLOY
-# -------------------------------------------------------------------
+def _can_run_sudo_local():
+    """
+    Checks whether sudo can run non-interactively on the local machine.
+    Runs: sudo -n true
+    """
+    try:
+        run_command("sudo -n true")
+        return True
+    except Exception as e:
+        logger.warning(f"Local sudo test failed: {e}")
+        return False
+
+
+# ===================================================================
+# REMOTE DEPLOYMENT
+# ===================================================================
 def deploy_remote(server_info, repo_name, push_branch, notifier):
     """
-    1) Ensure the repo directory is present on remote or clone if needed.
-    2) Git pull from the existing directory.
-    3) If changes found or force_rebuild, perform docker-compose down/up with sudo if configured.
+    Executes remote deployment steps via SSH:
+      1) Connects via SSH.
+      2) Ensures the repository exists on remote (cloning if allowed).
+      3) Pulls updates from git.
+      4) Rebuilds containers if changes are detected or forced.
     """
     host = server_info["host"]
     port = server_info.get("port", 22)
     user = server_info["user"]
-    key_type = server_info.get("key_type", "pem")
-    key_path = server_info["key_path"]
     branch = server_info.get("branch", "main")
     deploy_dir = server_info["deploy_dir"]
     clone_url = server_info.get("clone_url")
     create_dir = server_info.get("create_dir", False)
     force_rebuild = server_info.get("force_rebuild", False)
-    use_sudo = server_info.get("sudo", False)  # Read sudo flag from config
+    use_sudo = server_info.get("sudo", False)
+    key_type = server_info.get("key_type", "pem")
+    key_path = server_info["key_path"]
 
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    # Load private key based on key type.
-    if key_type.lower() == "pem":
-        private_key = paramiko.RSAKey.from_private_key_file(key_path)
-    elif key_type.lower() == "ppk":
-        private_key = paramiko.RSAKey.from_private_key_file(key_path)
-    else:
-        raise ValueError(f"Unsupported key_type '{key_type}'. Use 'pem' or 'ppk'.")
-
     try:
-        ssh_client.connect(hostname=host, port=port, username=user, pkey=private_key, timeout=15)
+        private_key = _load_private_key(key_type, key_path)
+        ssh_client.connect(
+            hostname=host,
+            port=port,
+            username=user,
+            pkey=private_key,
+            timeout=15
+        )
         logger.info(f"SSH connected to {host} as {user}")
 
-        _ensure_remote_repo(ssh_client, deploy_dir, clone_url, create_dir, branch)
+        try:
+            _ensure_remote_repo(ssh_client, deploy_dir, clone_url, create_dir, branch)
+        except Exception as repo_err:
+            raise RuntimeError(f"Failed to ensure remote repository at {deploy_dir}: {repo_err}")
 
-        # Step 2: Git pull.
+        # Pull the latest changes
         pull_cmd = f"cd {deploy_dir} && git pull origin {branch}"
         pull_output = _exec_ssh_command(ssh_client, pull_cmd)
-        logger.debug(f"Remote pull output: {pull_output}")
+        logger.info(f"Remote git pull output:\n{pull_output}")
 
+        # Decide if we need to rebuild
         do_rebuild = force_rebuild or ("Already up to date." not in pull_output)
-        if do_rebuild:
-            logger.info("Remote changes found OR force_rebuild=True -> taking down containers & rebuilding...")
-        else:
-            logger.info("No changes found on remote, skipping Docker rebuild...")
+        docker_bin = _detect_docker_compose_binary(ssh_client)
 
-        # Detect docker-compose binary.
-        docker_compose_bin = _detect_docker_compose_binary(ssh_client)
-
-        # Use the sudo prefix from config, or fallback on OS detection if not set.
+        docker_prefix = ""
         if use_sudo:
-            docker_prefix = "sudo "
+            if _can_run_sudo_remote(ssh_client):
+                docker_prefix = "sudo "
+            else:
+                logger.warning("Sudo requested but not available remotely. Proceeding without sudo.")
         else:
-            os_type = _exec_ssh_command(ssh_client, "uname -s").strip()
-            docker_prefix = "sudo " if "Linux" in os_type else ""
+            docker_prefix = _default_docker_prefix(ssh_client)
 
         if do_rebuild:
-            down_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_compose_bin} down --remove-orphans"
+            logger.info("Changes detected or forced rebuild on remote. Rebuilding containers.")
+            down_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_bin} down --remove-orphans"
             _exec_ssh_command(ssh_client, down_cmd, allow_benign_errors=True)
-            up_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_compose_bin} up -d --build --remove-orphans"
-            _exec_ssh_command(ssh_client, up_cmd)
+
+            up_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_bin} up -d --build --remove-orphans"
+            rebuild_output = _exec_ssh_command(ssh_client, up_cmd)
+            logger.info(f"Docker rebuild output:\n{rebuild_output}")
         else:
-            up_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_compose_bin} up -d"
-            _exec_ssh_command(ssh_client, up_cmd)
+            logger.info("No changes detected remotely. Bringing up containers without rebuilding.")
+            up_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_bin} up -d"
+            up_output = _exec_ssh_command(ssh_client, up_cmd)
+            logger.info(f"Docker up output:\n{up_output}")
 
         notifier.notify_deploy_event(repo_name, push_branch, "successful", f"Remote server {host} updated.")
     except Exception as e:
-        logger.error(f"Remote deploy error on {host}: {e}")
+        logger.error(f"Remote deploy error on {host}: {e}", exc_info=True)
         notifier.notify_deploy_event(repo_name, push_branch, "failed", str(e))
         raise
     finally:
@@ -210,51 +247,84 @@ def deploy_remote(server_info, repo_name, push_branch, notifier):
         logger.info(f"SSH disconnected from {host}")
 
 
+def _load_private_key(key_type: str, key_path: str):
+    """
+    Loads a private key based on key type. Currently supports 'pem' and 'ppk'.
+    """
+    key_type = key_type.lower()
+    if key_type in ("pem", "ppk"):
+        return paramiko.RSAKey.from_private_key_file(key_path)
+    raise ValueError(f"Unsupported key_type '{key_type}'. Use 'pem' or 'ppk'.")
+
+
 def _ensure_remote_repo(ssh_client, deploy_dir: str, clone_url: str, create_dir: bool, branch: str):
     """
-    Checks if 'deploy_dir' exists on remote. If not:
-      - If create_dir is False, raise an error.
-      - If create_dir is True, 'git clone' from clone_url into that path.
+    Ensures that the remote deploy directory exists. Clones if needed.
     """
     check_cmd = f'[ -d "{deploy_dir}" ] && echo "EXISTS" || echo "NOT_EXISTS"'
     result = _exec_ssh_command(ssh_client, check_cmd).strip()
     if result == "EXISTS":
-        logger.info(f"Remote directory '{deploy_dir}' already exists.")
+        logger.info(f"Remote directory exists: {deploy_dir}")
         return
 
     if not create_dir:
         msg = (
-            f"Directory '{deploy_dir}' does not exist on remote. "
-            f"Set 'create_dir: true' to attempt cloning the repository."
+            f"Remote directory '{deploy_dir}' does not exist. "
+            "Set 'create_dir: true' to clone the repository automatically."
         )
         raise FileNotFoundError(msg)
 
     if not clone_url:
-        raise ValueError(f"'clone_url' is not specified, cannot clone into '{deploy_dir}'.")
+        raise ValueError(f"'clone_url' must be specified to clone into remote '{deploy_dir}'.")
 
     parent_dir = os.path.dirname(deploy_dir)
     if parent_dir:
-        mk_parent = f'mkdir -p "{parent_dir}"'
+        mk_cmd = f'mkdir -p "{parent_dir}"'
         logger.info(f"Creating remote parent directory: {parent_dir}")
-        _exec_ssh_command(ssh_client, mk_parent)
+        _exec_ssh_command(ssh_client, mk_cmd)
 
     clone_cmd = f'cd "{parent_dir or "/"}" && git clone --branch {branch} {clone_url} "{deploy_dir}"'
-    logger.info(f"Remote directory '{deploy_dir}' not found. Cloning with command: {clone_cmd}")
+    logger.info(f"Cloning remote repository with command: {clone_cmd}")
     _exec_ssh_command(ssh_client, clone_cmd)
+
+
+def _default_docker_prefix(ssh_client) -> str:
+    """
+    Determines a default docker command prefix based on the remote OS.
+    Returns "sudo " for Linux if necessary.
+    """
+    try:
+        os_type = _exec_ssh_command(ssh_client, "uname -s", timeout=5).strip()
+        return "sudo " if "Linux" in os_type else ""
+    except Exception:
+        return ""
+
+
+def _can_run_sudo_remote(ssh_client) -> bool:
+    """
+    Checks if sudo can run non-interactively on the remote machine.
+    Executes 'sudo -n true' remotely.
+    """
+    try:
+        _exec_ssh_command(ssh_client, "sudo -n true", timeout=10, allow_benign_errors=True)
+        return True
+    except Exception as e:
+        logger.warning(f"Remote sudo test failed: {e}")
+        return False
 
 
 def _detect_docker_compose_binary(ssh_client) -> str:
     """
-    Checks for 'docker compose' vs 'docker-compose' on the remote machine.
-    Returns whichever is found first.
+    Detects whether 'docker compose' or 'docker-compose' is available on the remote.
+    Returns the detected binary.
     """
     try:
         _exec_ssh_command(ssh_client, "which docker", timeout=5)
-        version_out = _exec_ssh_command(ssh_client, "docker compose version", timeout=5)
+        version_out = _exec_ssh_command(ssh_client, "docker compose version", timeout=5, allow_benign_errors=True)
         if "Docker Compose version" in version_out:
             return "docker compose"
     except Exception as e:
-        logger.debug(f"'docker compose' not found or not working: {e}")
+        logger.debug(f"'docker compose' not available: {e}")
 
     try:
         _exec_ssh_command(ssh_client, "which docker-compose", timeout=5)
@@ -265,443 +335,95 @@ def _detect_docker_compose_binary(ssh_client) -> str:
     raise RuntimeError("Neither 'docker compose' nor 'docker-compose' found on the remote system.")
 
 
-# -------------------------------------------------------------------
-# TASKS
-# -------------------------------------------------------------------
+# ===================================================================
+# TASK EXECUTION
+# ===================================================================
 def run_local_tasks(tasks, cwd, notifier, repo_name, push_branch):
+    """
+    Executes a list of local commands sequentially.
+    """
     for cmd in tasks:
+        logger.info(f"Executing local task: {cmd}")
         try:
             out, err = run_command(cmd, cwd=cwd)
-            if out:
-                logger.info(out)
-            if err:
-                logger.warning(err)
+            if out.strip():
+                logger.info(f"Local task output:\n{out}")
+            else:
+                logger.info(f"Local task '{cmd}' returned no output.")
+            if err.strip():
+                logger.warning(f"Local task error output:\n{err}")
         except Exception as e:
-            logger.error(f"Error running local task '{cmd}': {e}")
-            notifier.notify_deploy_event(repo_name, push_branch, "failed", f"Task '{cmd}' failed.")
+            logger.error(f"Local task '{cmd}' failed: {e}", exc_info=True)
+            notifier.notify_deploy_event(
+                repo_name, push_branch, "failed", f"Local task '{cmd}' failed: {e}"
+            )
             raise
 
 
 def run_remote_tasks(tasks, server_info, notifier, repo_name, push_branch):
+    """
+    Executes a list of commands on a remote host via SSH and logs the output.
+    Now uses get_pty=True so sudo can be used without silently failing.
+    """
     host = server_info["host"]
     port = server_info.get("port", 22)
     user = server_info["user"]
     key_path = server_info["key_path"]
+    key_type = server_info.get("key_type", "pem")
 
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
     try:
-        private_key = paramiko.RSAKey.from_private_key_file(key_path)
+        private_key = _load_private_key(key_type, key_path)
         ssh_client.connect(hostname=host, port=port, username=user, pkey=private_key, timeout=15)
 
         for cmd in tasks:
+            logger.info(f"Executing remote task on {host}: {cmd}")
             try:
-                _exec_ssh_command(ssh_client, cmd)
+                result = _exec_ssh_command(ssh_client, cmd)
+                if result.strip():
+                    logger.info(f"Remote task '{cmd}' output:\n{result}")
+                else:
+                    logger.info(f"Remote task '{cmd}' returned no output.")
             except Exception as e:
-                logger.error(f"Error running remote task '{cmd}' on {host}:{port}: {e}")
-                notifier.notify_deploy_event(repo_name, push_branch, "failed", f"Remote task '{cmd}' failed.")
+                logger.error(f"Remote task '{cmd}' failed on {host}: {e}", exc_info=True)
+                notifier.notify_deploy_event(
+                    repo_name, push_branch, "failed", f"Remote task '{cmd}' failed: {e}"
+                )
                 raise
     finally:
         ssh_client.close()
+        logger.info(f"SSH disconnected from {host}")
 
 
 def _exec_ssh_command(ssh_client, cmd, timeout=30, allow_benign_errors=False):
     """
-    Execute an SSH command and return its combined stdout as a string.
-    Raises RuntimeError if the command fails (unless the error is benign).
+    Executes an SSH command using exec_command(..., get_pty=True) and returns stdout as a string.
+
+    - If the command fails (non-zero exit), raises a RuntimeError unless
+      allow_benign_errors=True, in which case it only logs a warning.
+    - Using get_pty=True helps with 'sudo' and other commands that need a TTY.
+    - Both stdout and stderr are captured; if there's content in stderr and
+      exit_status != 0, we treat it as an error (unless allow_benign_errors).
     """
-    stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=timeout)
+    logger.debug(f"Executing SSH command (PTY): {cmd}")
+    # We enable get_pty so that sudo and other interactive commands can run
+    stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=timeout, get_pty=True)
 
-    output_lines = []
-    error_lines = []
+    # It's good practice to close stdin if you don't plan to write to it
+    stdin.channel.shutdown_write()
 
-    while not stdout.channel.exit_status_ready():
-        if stdout.channel.recv_ready():
-            output = stdout.channel.recv(1024).decode()
-            output_lines.append(output)
-            logger.info(f"[SSH STDOUT] {output.strip()}")
-
-        if stderr.channel.recv_ready():
-            error = stderr.channel.recv(1024).decode()
-            error_lines.append(error)
-            logger.warning(f"[SSH STDERR] {error.strip()}")
-
+    # Wait for the command to complete
     exit_status = stdout.channel.recv_exit_status()
-    full_error_output = "".join(error_lines).strip()
 
-    if exit_status != 0:
-        benign_markers = [
-            "No container found",
-            "No containers to remove",
-            "has active endpoints",
-        ]
-        if allow_benign_errors and any(marker in full_error_output for marker in benign_markers):
-            logger.warning(f"Ignoring benign error while running '{cmd}': {full_error_output}")
-        else:
-            raise RuntimeError(
-                f"Command '{cmd}' failed with exit code {exit_status}. Error: {full_error_output}"
-            )
+    out = stdout.read().decode("utf-8", errors="replace")
+    err = stderr.read().decode("utf-8", errors="replace")
 
-    return "".join(output_lines).strip()
+    logger.debug(f"Command '{cmd}' exit status: {exit_status}")
+    if err.strip():
+        logger.debug(f"Command '{cmd}' stderr:\n{err}")
 
-# # Filename: deploy_chain.py
-#
-# import logging
-# import os
-# import paramiko
-# from utils import run_command, restart_containers
-#
-# logger = logging.getLogger(__name__)
-#
-#
-# def deploy_chain(repo_name: str, push_branch: str, servers_config: dict, notifier):
-#     """
-#     Iterates over server1, server2, ... in servers_config
-#     and deploys each one sequentially.
-#     """
-#     server_keys = sorted(servers_config.keys())
-#     for server_key in server_keys:
-#         server_info = servers_config[server_key]
-#         logger.info(f"=== Deploying {server_key} for repo '{repo_name}' ===")
-#
-#         # Skip non-"serverX" keys
-#         if not server_key.startswith("server"):
-#             logger.info(f"Skipping '{server_key}' as it's not recognized as a server definition.")
-#             continue
-#
-#         target = server_info.get("target")
-#         config_branch = server_info.get("branch", "main")
-#         if push_branch != config_branch:
-#             msg = f"Push branch '{push_branch}' does not match '{config_branch}'. Skipping {server_key}."
-#             logger.info(msg)
-#             notifier.notify_deploy_event(repo_name, push_branch, "ignored", msg)
-#             continue
-#
-#         try:
-#             # Deploy
-#             if target == "local":
-#                 deploy_local(server_info, repo_name, push_branch, notifier)
-#             elif target == "remote":
-#                 deploy_remote(server_info, repo_name, push_branch, notifier)
-#             else:
-#                 msg = f"Unknown target '{target}' for {server_key}. Skipping."
-#                 logger.warning(msg)
-#                 notifier.notify_deploy_event(repo_name, push_branch, "failed", msg)
-#                 continue
-#
-#             # Optional additional tasks
-#             tasks = server_info.get("additional_terminal_tasks", [])
-#             if tasks:
-#                 if target == "local":
-#                     run_local_tasks(tasks, server_info.get("deploy_dir"), notifier, repo_name, push_branch)
-#                 else:
-#                     run_remote_tasks(tasks, server_info, notifier, repo_name, push_branch)
-#
-#             logger.info(f"=== Finished {server_key} ===\n")
-#         except Exception as e:
-#             # If any error happens for this server, log it. (You can re-raise if desired.)
-#             logger.error(f"Deployment failed on {server_key}: {e}")
-#             # raise  # <- Uncomment if you want to stop the entire chain on first error.
-#
-#
-# # -------------------------------------------------------------------
-# # LOCAL DEPLOY
-# # -------------------------------------------------------------------
-# def deploy_local(server_info, repo_name, push_branch, notifier):
-#     """
-#     1) Ensure the repo directory is present or create/clone it.
-#     2) Perform 'git pull' from that directory.
-#     3) If changes found or force_rebuild, rebuild containers.
-#     """
-#     try:
-#         deploy_dir = server_info["deploy_dir"]
-#         branch = server_info.get("branch", "main")
-#         clone_url = server_info.get("clone_url")
-#         create_dir = server_info.get("create_dir", False)
-#         force_rebuild = server_info.get("force_rebuild", False)
-#
-#         _ensure_local_repo(deploy_dir, clone_url, create_dir, branch)
-#
-#         # Step 2: Git Pull
-#         git_cmd = f"git pull origin {branch}"
-#         out, err = run_command(git_cmd, cwd=deploy_dir)
-#         logger.info(out)
-#
-#         # Step 3: Rebuild if needed
-#         if "Already up to date." not in out or force_rebuild:
-#             restart_containers(deploy_dir)  # calls docker-compose down/up internally
-#         else:
-#             logger.info("No changes found locally, skipping Docker rebuild.")
-#
-#         notifier.notify_deploy_event(repo_name, push_branch, "successful", "Local deployment completed.")
-#     except Exception as e:
-#         logger.error(f"Local deploy error: {e}")
-#         notifier.notify_deploy_event(repo_name, push_branch, "failed", str(e))
-#         raise
-#
-#
-# def _ensure_local_repo(deploy_dir: str, clone_url: str, create_dir: bool, branch: str):
-#     """
-#     Checks if 'deploy_dir' exists locally. If not:
-#       - If create_dir is False: raise an error.
-#       - If create_dir is True: 'git clone' from clone_url into that path.
-#     """
-#     if os.path.isdir(deploy_dir):
-#         logger.info(f"Local directory '{deploy_dir}' already exists.")
-#         return
-#
-#     if not create_dir:
-#         msg = (
-#             f"Directory '{deploy_dir}' does not exist locally. "
-#             f"Set 'create_dir: true' if you want to attempt creating and cloning the repository."
-#         )
-#         raise FileNotFoundError(msg)
-#
-#     if not clone_url:
-#         raise ValueError(f"'clone_url' is not specified, cannot clone into '{deploy_dir}'.")
-#
-#     # Attempt to create parent dirs if needed
-#     parent_dir = os.path.dirname(deploy_dir)
-#     if parent_dir and not os.path.isdir(parent_dir):
-#         logger.info(f"Creating local parent directory: {parent_dir}")
-#         os.makedirs(parent_dir, exist_ok=True)
-#
-#     # 'git clone <URL> <deploy_dir>'
-#     clone_cmd = f"git clone --branch {branch} {clone_url} \"{deploy_dir}\""
-#     logger.info(f"Local directory '{deploy_dir}' not found. Cloning: {clone_cmd}")
-#     run_command(clone_cmd, cwd=parent_dir or ".")
-#
-#
-# # -------------------------------------------------------------------
-# # REMOTE DEPLOY
-# # -------------------------------------------------------------------
-# def deploy_remote(server_info, repo_name, push_branch, notifier):
-#     """
-#     1) Ensure the repo directory is present on remote or clone if needed.
-#     2) Git pull from the existing directory.
-#     3) If changes found or force_rebuild, docker-compose down/up with sudo if needed.
-#     """
-#     host = server_info["host"]
-#     port = server_info.get("port", 22)
-#     user = server_info["user"]
-#     key_type = server_info.get("key_type", "pem")
-#     key_path = server_info["key_path"]
-#     branch = server_info.get("branch", "main")
-#     deploy_dir = server_info["deploy_dir"]
-#     clone_url = server_info.get("clone_url")
-#     create_dir = server_info.get("create_dir", False)
-#     force_rebuild = server_info.get("force_rebuild", False)
-#
-#     # Prepare SSH
-#     ssh_client = paramiko.SSHClient()
-#     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-#
-#     # Load private key
-#     if key_type.lower() == "pem":
-#         private_key = paramiko.RSAKey.from_private_key_file(key_path)
-#     elif key_type.lower() == "ppk":
-#         private_key = paramiko.RSAKey.from_private_key_file(key_path)
-#     else:
-#         raise ValueError(f"Unsupported key_type '{key_type}'. Use 'pem' or 'ppk'.")
-#
-#     try:
-#         ssh_client.connect(hostname=host, port=port, username=user, pkey=private_key, timeout=15)
-#         logger.info(f"SSH connected to {host} as {user}")
-#
-#         # Step 1: Ensure repo directory
-#         _ensure_remote_repo(ssh_client, deploy_dir, clone_url, create_dir, branch)
-#
-#         # Step 2: Git pull
-#         pull_cmd = f"cd {deploy_dir} && git pull origin {branch}"
-#         pull_output = _exec_ssh_command(ssh_client, pull_cmd)
-#         logger.debug(f"Remote pull output: {pull_output}")
-#
-#         # Step 3: Docker compose
-#         do_rebuild = force_rebuild or ("Already up to date." not in pull_output)
-#         if do_rebuild:
-#             logger.info("Remote changes found OR force_rebuild=True -> taking down containers & rebuilding...")
-#         else:
-#             logger.info("No changes found on remote, skipping Docker rebuild...")
-#
-#         # Detect which docker-compose tool is installed (docker-compose vs docker compose)
-#         docker_compose_bin = _detect_docker_compose_binary(ssh_client)
-#
-#         # Check OS to see if we need sudo
-#         os_type = _exec_ssh_command(ssh_client, "uname -s").strip()
-#         docker_prefix = ""
-#         if "Linux" in os_type:
-#             docker_prefix = "sudo "
-#
-#         if do_rebuild:
-#             # docker-compose down
-#             down_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_compose_bin} down --remove-orphans"
-#             _exec_ssh_command(ssh_client, down_cmd, allow_benign_errors=True)
-#             # docker-compose up --build
-#             up_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_compose_bin} up -d --build --remove-orphans"
-#             _exec_ssh_command(ssh_client, up_cmd)
-#         else:
-#             # docker-compose up
-#             up_cmd = f"cd {deploy_dir} && {docker_prefix}{docker_compose_bin} up -d"
-#             _exec_ssh_command(ssh_client, up_cmd)
-#
-#         notifier.notify_deploy_event(repo_name, push_branch, "successful", f"Remote server {host} updated.")
-#     except Exception as e:
-#         logger.error(f"Remote deploy error on {host}: {e}")
-#         notifier.notify_deploy_event(repo_name, push_branch, "failed", str(e))
-#         raise
-#     finally:
-#         ssh_client.close()
-#         logger.info(f"SSH disconnected from {host}")
-#
-#
-# def _ensure_remote_repo(ssh_client, deploy_dir: str, clone_url: str, create_dir: bool, branch: str):
-#     """
-#     Checks if 'deploy_dir' exists on remote. If not:
-#       - If create_dir is False, raise an error.
-#       - If create_dir is True, git clone from clone_url into that path.
-#     """
-#     check_cmd = f'[ -d "{deploy_dir}" ] && echo "EXISTS" || echo "NOT_EXISTS"'
-#     result = _exec_ssh_command(ssh_client, check_cmd).strip()
-#     if result == "EXISTS":
-#         logger.info(f"Remote directory '{deploy_dir}' already exists.")
-#         return
-#
-#     if not create_dir:
-#         msg = (
-#             f"Directory '{deploy_dir}' does not exist on remote. "
-#             f"Set 'create_dir: true' to attempt cloning the repository."
-#         )
-#         raise FileNotFoundError(msg)
-#
-#     if not clone_url:
-#         raise ValueError(f"'clone_url' is not specified, cannot clone into '{deploy_dir}'.")
-#
-#     # Create parent directory if needed
-#     parent_dir = os.path.dirname(deploy_dir)
-#     if parent_dir:
-#         mk_parent = f'mkdir -p "{parent_dir}"'
-#         logger.info(f"Creating remote parent directory: {parent_dir}")
-#         _exec_ssh_command(ssh_client, mk_parent)
-#
-#     # Git clone
-#     clone_cmd = f'cd "{parent_dir or "/"}" && git clone --branch {branch} {clone_url} "{deploy_dir}"'
-#     logger.info(f"Remote directory '{deploy_dir}' not found. Cloning with command: {clone_cmd}")
-#     _exec_ssh_command(ssh_client, clone_cmd)
-#
-#
-# # -------------------------------------------------------------------
-# # HELPERS: Docker Compose Detection
-# # -------------------------------------------------------------------
-# def _detect_docker_compose_binary(ssh_client) -> str:
-#     """
-#     Checks for 'docker compose' vs 'docker-compose' on the remote machine.
-#     Returns whichever is found first (prefers 'docker compose' if possible).
-#     Raises an error if neither is installed.
-#     """
-#     # Try 'docker compose' (v2) first
-#     try:
-#         _exec_ssh_command(ssh_client, "which docker", timeout=5)
-#         version_out = _exec_ssh_command(ssh_client, "docker compose version", timeout=5)
-#         if "Docker Compose version" in version_out:
-#             return "docker compose"
-#     except Exception as e:
-#         logger.debug(f"'docker compose' not found or not working: {e}")
-#
-#     # Fallback to 'docker-compose' (v1)
-#     try:
-#         _exec_ssh_command(ssh_client, "which docker-compose", timeout=5)
-#         return "docker-compose"
-#     except Exception:
-#         pass
-#
-#     # If neither is found, raise an error
-#     raise RuntimeError("Neither 'docker compose' nor 'docker-compose' found on the remote system.")
-#
-#
-# # -------------------------------------------------------------------
-# # TASKS
-# # -------------------------------------------------------------------
-# def run_local_tasks(tasks, cwd, notifier, repo_name, push_branch):
-#     for cmd in tasks:
-#         try:
-#             out, err = run_command(cmd, cwd=cwd)
-#             if out:
-#                 logger.info(out)
-#             if err:
-#                 logger.warning(err)
-#         except Exception as e:
-#             logger.error(f"Error running local task '{cmd}': {e}")
-#             notifier.notify_deploy_event(repo_name, push_branch, "failed", f"Task '{cmd}' failed.")
-#             raise
-#
-#
-# def run_remote_tasks(tasks, server_info, notifier, repo_name, push_branch):
-#     host = server_info["host"]
-#     port = server_info.get("port", 22)
-#     user = server_info["user"]
-#     key_path = server_info["key_path"]
-#
-#     ssh_client = paramiko.SSHClient()
-#     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-#
-#     try:
-#         private_key = paramiko.RSAKey.from_private_key_file(key_path)
-#         ssh_client.connect(hostname=host, port=port, username=user, pkey=private_key, timeout=15)
-#
-#         for cmd in tasks:
-#             try:
-#                 _exec_ssh_command(ssh_client, cmd)
-#             except Exception as e:
-#                 logger.error(f"Error running remote task '{cmd}' on {host}:{port}: {e}")
-#                 notifier.notify_deploy_event(repo_name, push_branch, "failed", f"Remote task '{cmd}' failed.")
-#                 raise
-#     finally:
-#         ssh_client.close()
-#
-#
-# # -------------------------------------------------------------------
-# # SSH Utility
-# # -------------------------------------------------------------------
-# def _exec_ssh_command(ssh_client, cmd, timeout=30, allow_benign_errors=False):
-#     """
-#     Execute an SSH command and return its combined stdout as a string.
-#     If the command fails with a non-zero exit code, raise RuntimeError
-#     unless we detect known benign errors (when allow_benign_errors=True).
-#     """
-#     stdin, stdout, stderr = ssh_client.exec_command(cmd, timeout=timeout)
-#
-#     output_lines = []
-#     error_lines = []
-#
-#     # Continuously read from stdout/stderr until command completes
-#     while not stdout.channel.exit_status_ready():
-#         if stdout.channel.recv_ready():
-#             output = stdout.channel.recv(1024).decode()
-#             output_lines.append(output)
-#             logger.info(f"[SSH STDOUT] {output.strip()}")
-#
-#         if stderr.channel.recv_ready():
-#             error = stderr.channel.recv(1024).decode()
-#             error_lines.append(error)
-#             logger.warning(f"[SSH STDERR] {error.strip()}")
-#
-#     exit_status = stdout.channel.recv_exit_status()
-#     full_error_output = "".join(error_lines).strip()
-#
-#     if exit_status != 0:
-#         # Check if we should ignore known "benign" errors
-#         benign_markers = [
-#             "No container found",
-#             "No containers to remove",
-#             "has active endpoints",
-#         ]
-#         if allow_benign_errors and any(marker in full_error_output for marker in benign_markers):
-#             logger.warning(f"Ignoring benign error while running '{cmd}': {full_error_output}")
-#         else:
-#             raise RuntimeError(
-#                 f"Command '{cmd}' failed with exit code {exit_status}. "
-#                 f"Error: {full_error_output}"
-#             )
-#
-#     return "".join(output_lines).strip()
+    if exit_status != 0 and not allow_benign_errors:
+        raise RuntimeError(f"Command '{cmd}' failed (exit {exit_status}): {err}")
+
+    return out

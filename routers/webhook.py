@@ -1,11 +1,9 @@
-# webhook.py is the FastAPI router for handling GitHub webhook events.
-
+import asyncio
 import logging
 import traceback
 import json
 from urllib.parse import parse_qs
 from fastapi import APIRouter, Request, Header, HTTPException, status
-
 from models.github_webhook import GitHubWebhook
 from notifications import Notifications
 from utils import verify_signature
@@ -15,6 +13,51 @@ from deploy_chain import deploy_chain
 router = APIRouter()
 logger = logging.getLogger(__name__)
 notifier = Notifications(config_path="config.yaml")
+
+# Dictionary to track currently running tasks keyed by (repo_full_name, branch)
+running_tasks = {}
+
+
+async def run_deploy_chain(repo_full_name: str, push_branch: str, sub_config: dict):
+    """
+    Runs the deployment chain in an executor to avoid blocking the event loop.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        # Run the synchronous deploy_chain in an executor.
+        await loop.run_in_executor(
+            None,
+            deploy_chain,
+            repo_full_name,
+            push_branch,
+            sub_config,
+            notifier
+        )
+        notifier.notify_deploy_event(
+            repo_full_name, push_branch, "successful", "All servers deployed."
+        )
+        logger.info(f"Deployment chain completed for {repo_full_name} on branch {push_branch}.")
+    except asyncio.CancelledError:
+        notifier.notify_deploy_event(
+            repo_full_name, push_branch, "failed", "Deployment canceled due to a new trigger."
+        )
+        logger.info(f"Deployment chain for {repo_full_name} on branch {push_branch} was canceled.")
+        raise
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        logger.error(f"Deployment chain failed: {str(e)}\n{error_trace}")
+        notifier.notify_deploy_event(repo_full_name, push_branch, "failed", str(e))
+
+
+def cancel_existing_task(repo_full_name: str, push_branch: str):
+    """
+    If there is an existing deployment task for the same repository and branch, cancel it.
+    """
+    key = (repo_full_name, push_branch)
+    existing_task = running_tasks.get(key)
+    if existing_task and not existing_task.done():
+        logger.info(f"Cancelling existing deployment for {repo_full_name} on branch {push_branch}.")
+        existing_task.cancel()
 
 
 @router.post("/webhook", summary="GitHub Webhook Endpoint")
@@ -65,12 +108,12 @@ async def handle_webhook(
             detail="Invalid JSON payload"
         )
 
-    # 3. Handle ping
+    # 3. Handle ping events
     if x_github_event == "ping" or "zen" in payload:
         logger.info("Received ping event from GitHub.")
         return {"message": "Ping successful.", "zen": payload.get("zen")}
 
-    # 4. Validate payload
+    # 4. Validate payload using your pydantic model
     try:
         webhook = GitHubWebhook(**payload)
     except Exception as e:
@@ -97,17 +140,15 @@ async def handle_webhook(
             detail=message
         )
 
-    # 5. Run the deployment chain for this repo
-    try:
-        sub_config = REPO_DEPLOY_MAP[repo_full_name]
-        deploy_chain(repo_full_name, push_branch, sub_config, notifier)
-        notifier.notify_deploy_event(repo_full_name, push_branch, "successful", "All servers deployed.")
-        return {"message": f"Deployment chain completed for {repo_full_name} on branch {push_branch}."}
-    except Exception as e:
-        error_trace = traceback.format_exc()
-        logger.error(f"Deployment chain failed: {str(e)}\n{error_trace}")
-        notifier.notify_deploy_event(repo_full_name, push_branch, "failed", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+    sub_config = REPO_DEPLOY_MAP[repo_full_name]
+
+    # 5. Cancel any existing deployment task for the same repository and branch.
+    cancel_existing_task(repo_full_name, push_branch)
+
+    # 6. Start the deployment chain as an asynchronous background task.
+    key = (repo_full_name, push_branch)
+    task = asyncio.create_task(run_deploy_chain(repo_full_name, push_branch, sub_config))
+    running_tasks[key] = task
+
+    # 7. Respond immediately to GitHub.
+    return {"message": f"Deployment chain started for {repo_full_name} on branch {push_branch}."}

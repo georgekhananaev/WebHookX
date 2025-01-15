@@ -181,15 +181,16 @@ Body (JSON):
 
 ### Repository Deployment Map (`repo_deploy_map`)
 
-| Property                  | Type           | Usage                                                                                           | Example                                    |
-|---------------------------|----------------|-------------------------------------------------------------------------------------------------|--------------------------------------------|
-| `target`                  | String         | Specifies the deployment target: `local` for local execution, `remote` for remote via SSH.      | `"local"`                                  |
+| Property                  | Type           | Usage                                                                                                    | Example                                    |
+|---------------------------|----------------|----------------------------------------------------------------------------------------------------------|--------------------------------------------|
+| `target`                  | String         | Specifies the deployment target: `local` for local execution, `remote` for remote via SSH.               | `"local"`                                  |
 | `clone_url`               | String         | The Git repository URL used to pull updates. (Often includes a Personal Access Token for private repos.) | `"https://yourPAT@github.com/your/repo.git"` |
-| `create_dir`              | Boolean        | Indicates whether to create the `deploy_dir` if it does not already exist.                      | `true`                                     |
-| `deploy_dir`              | String         | The directory path where the repository is deployed.                                            | `"/path/to/deploy"`                        |
-| `branch`                  | String         | The Git branch that triggers a deployment. Only deploys if the push event’s branch matches.     | `"main"`                                   |
-| `force_rebuild`           | Boolean        | Forces Docker rebuilds even when Git reports \"Already up to date.\"                            | `true`                                     |
-| `additional_terminal_tasks` | List of Strings | Extra shell commands to execute after the main deployment steps.                                | `["cd frontend && ping -n 3 google.com"]`  |
+| `create_dir`              | Boolean        | Indicates whether to create the `deploy_dir` if it does not already exist.                               | `true`                                     |
+| `deploy_dir`              | String         | The directory path where the repository is deployed.                                                     | `"/path/to/deploy"`                        |
+| `branch`                  | String         | The Git branch that triggers a deployment. Only deploys if the push event’s branch matches.              | `"main"`                                   |
+| `force_rebuild`           | Boolean        | Forces Docker rebuilds even when Git reports \"Already up to date.\"                                     | `true`                                     |
+| `additional_tasks_only`     | Boolean         | Once enabledm, it skips the built and running additional_terminal_tasks commands only.                | `true`                                     |
+| `additional_terminal_tasks` | List of Strings | Extra shell commands to execute after the main deployment steps.                                      | `["cd frontend && ping -n 3 google.com"]`  |
 
 #### For Remote Targets
 
